@@ -29,7 +29,7 @@ import siteRoutes from './modules/sites'
 
 export function createApp() {
   const app = express()
-  app.set('trust proxy', true) // honour X-Forwarded-For so req.ip is the real client IP
+  app.set("trust proxy", 1); // honour X-Forwarded-For so req.ip is the real client IP
 
   app.use(helmet({
     contentSecurityPolicy: false,
