@@ -104,6 +104,87 @@ export function computeDay(input: ComputeInput): DayResult {
   }
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Net Productive Hours model (single source of truth for live + finalized totals)
+//
+// Required Productive = Shift − allowed lunch − allowed tea   (breaks are "free" time)
+// Net Productive      = elapsed(clockIn→now) − ACTUAL lunch − ACTUAL tea − idle
+//                       (full breaks unpaid; extra break is therefore unpaid too)
+// Remaining           = max(0, Required − Net)
+// Overtime            = max(0, Net − Required)
+// Expected Logout     = clockIn + Required + actualLunch + actualTea + idle
+//                       (= now + Remaining; uses LESS break ⇒ finishes earlier)
+// All durations are EXACT seconds — idle is never rounded up to a whole minute.
+// ───────────────────────────────────────────────────────────────────────────
+export interface ProductiveInput {
+  clockIn: Date
+  now?: Date // clockOut, or the current time for a live session
+  spanSeconds?: number // explicit presence (Σ segment durations, excludes clocked-out gaps); overrides now−clockIn
+  idleSeconds: number // EXACT measured idle seconds (to the second)
+  lunchSeconds: number // actual lunch taken
+  teaSeconds: number // actual tea taken
+  policy: WorkPolicy
+}
+export interface ProductiveResult {
+  shiftLenSeconds: number
+  spanSeconds: number
+  requiredProductiveSeconds: number
+  allowedLunchSeconds: number
+  allowedTeaSeconds: number
+  countedLunchSeconds: number
+  countedTeaSeconds: number
+  extraLunchSeconds: number
+  extraTeaSeconds: number
+  extraBreakSeconds: number
+  idleSeconds: number
+  netProductiveSeconds: number
+  remainingProductiveSeconds: number
+  overtimeSeconds: number
+  completionPct: number
+  expectedLogout: Date
+}
+
+export function productiveTotals(input: ProductiveInput): ProductiveResult {
+  const shiftStart = hhmmOn(input.clockIn, input.policy.shiftStart)
+  let shiftEnd = hhmmOn(input.clockIn, input.policy.shiftEnd)
+  if (shiftEnd.getTime() <= shiftStart.getTime()) shiftEnd = new Date(shiftEnd.getTime() + 24 * 3600_000) // overnight shift
+  const shiftLenSeconds = Math.max(0, Math.round((shiftEnd.getTime() - shiftStart.getTime()) / 1000))
+
+  const allowedLunchSeconds = input.policy.breakAllowanceSeconds.lunch ?? 0
+  const allowedTeaSeconds = input.policy.breakAllowanceSeconds.tea ?? 0
+  const requiredProductiveSeconds = Math.max(0, shiftLenSeconds - allowedLunchSeconds - allowedTeaSeconds)
+
+  const lunch = Math.max(0, input.lunchSeconds || 0)
+  const tea = Math.max(0, input.teaSeconds || 0)
+  const idle = Math.max(0, Math.round(input.idleSeconds || 0)) // exact seconds, no minute rounding
+  const countedLunchSeconds = Math.min(lunch, allowedLunchSeconds)
+  const countedTeaSeconds = Math.min(tea, allowedTeaSeconds)
+  const extraLunchSeconds = Math.max(0, lunch - allowedLunchSeconds)
+  const extraTeaSeconds = Math.max(0, tea - allowedTeaSeconds)
+  const extraBreakSeconds = extraLunchSeconds + extraTeaSeconds
+
+  const spanSeconds = input.spanSeconds != null
+    ? Math.max(0, Math.round(input.spanSeconds))
+    : Math.max(0, Math.round(((input.now?.getTime() ?? Date.now()) - input.clockIn.getTime()) / 1000))
+  // Model A: every break minute is unpaid → subtract the FULL breaks plus idle.
+  const netProductiveSeconds = Math.max(0, spanSeconds - lunch - tea - idle)
+  const remainingProductiveSeconds = Math.max(0, requiredProductiveSeconds - netProductiveSeconds)
+  const overtimeSeconds = Math.max(0, netProductiveSeconds - requiredProductiveSeconds)
+  const completionPct = requiredProductiveSeconds > 0
+    ? Math.min(100, Math.round((netProductiveSeconds / requiredProductiveSeconds) * 100))
+    : 100
+  // Expected logout = clockIn + required + actual breaks + idle (≡ now + remaining).
+  const expectedLogout = new Date(input.clockIn.getTime() + (requiredProductiveSeconds + lunch + tea + idle) * 1000)
+
+  return {
+    shiftLenSeconds, spanSeconds, requiredProductiveSeconds,
+    allowedLunchSeconds, allowedTeaSeconds, countedLunchSeconds, countedTeaSeconds,
+    extraLunchSeconds, extraTeaSeconds, extraBreakSeconds,
+    idleSeconds: idle, netProductiveSeconds, remainingProductiveSeconds,
+    overtimeSeconds, completionPct, expectedLogout,
+  }
+}
+
 /** Derive a WorkPolicy from a Branch document (reuses existing CRM branch settings). */
 export function policyFromBranch(branch: {
   shift?: { startTime?: string; endTime?: string; graceMinutes?: number }
@@ -119,6 +200,7 @@ export function policyFromBranch(branch: {
       lunch: (branch.breaks?.lunchMinutes ?? 45) * 60,
       tea: (branch.breaks?.teaMinutes ?? 15) * 60,
     },
-    billingModel: branch.breaks?.billingModel || 'B',
+    // Net Productive model: every break minute is unpaid (Model A) for ALL branches.
+    billingModel: 'A',
   }
 }

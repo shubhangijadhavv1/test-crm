@@ -12,6 +12,10 @@ const activityTickSchema = new Schema(
     branchId: { type: Schema.Types.ObjectId, ref: 'Branch', index: true },
     ts: { type: Date, required: true }, // agent-stamped (immune to upload delay)
     isIdle: { type: Boolean, default: false },
+    // Exact idle seconds within this minute (0–60), agent-measured. Legacy ticks lack this;
+    // recompute falls back to isIdle×60 when it's absent. This is what makes idle totals
+    // accurate to the second instead of rounding every flagged minute up to a full 60s.
+    idleSeconds: { type: Number, default: null },
     state: { type: String, enum: ['active', 'idle', 'break'], default: 'active' },
     activeApp: String,
     activeTitle: String, // foreground window title
@@ -34,6 +38,11 @@ const screenshotSchema = new Schema(
     url: String,
     thumbnailUrl: String,
     blurred: { type: Boolean, default: false },
+    // Multi-monitor: which screen this shot is from (1-based), how many were captured, label.
+    screen: { type: Number, default: 1 },
+    screenCount: { type: Number, default: 1 },
+    primary: { type: Boolean, default: true },
+    label: { type: String, default: '' },
   },
   { timestamps: true }
 )

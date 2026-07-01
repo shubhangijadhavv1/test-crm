@@ -34,6 +34,33 @@ const createBody = z.object({
 
 const roleRank: Record<Role, number> = { employee: 1, admin: 2, superadmin: 3 }
 
+/**
+ * Load a non-deleted target user and enforce that the caller may manage them:
+ * super admin → anyone; branch admin → only their own branch, and never a super admin.
+ */
+async function loadManageable(req: import('express').Request, id: string) {
+  const target = await User.findOne({ _id: id, isDeleted: false })
+  if (!target) throw ApiError.notFound('Employee not found')
+  if (req.user!.role !== 'superadmin') {
+    if (target.role === 'superadmin') throw ApiError.forbidden('Not permitted')
+    if (req.user!.branchId && String(target.branchId) !== String(req.user!.branchId)) {
+      throw ApiError.forbidden('You can only manage employees in your branch')
+    }
+  }
+  return target
+}
+
+// Fields a manager may change via the generic PATCH (prevents mass-assignment of role/branch/etc.).
+const patchBody = z.object({
+  fullName: z.string().min(1).optional(),
+  department: z.string().optional(),
+  designation: z.string().optional(),
+  workMode: z.enum(['office', 'wfh', 'hybrid']).optional(),
+  webPunchEnabled: z.boolean().optional(),
+  screenshotsEnabled: z.boolean().optional(),
+  allowedIps: z.array(z.string()).optional(),
+}).strict()
+
 // GET /employees — directory (branch-scoped for non-SA; employees see only themselves)
 router.get('/', asyncHandler(async (req, res) => {
   const { page, limit, skip, sort } = parsePaging(req.query as Record<string, unknown>)
@@ -105,25 +132,20 @@ router.post('/', requireRole('superadmin', 'admin'), validate(createBody), async
   created(res, safe)
 }))
 
-router.patch('/:id', requireRole('superadmin', 'admin'), asyncHandler(async (req, res) => {
-  const update = { ...req.body }
-  delete update.passwordHash; delete update.password; delete update.role // role via dedicated path
-  const doc = await User.findByIdAndUpdate(req.params.id, { ...update, updatedBy: req.user!.id }, { new: true })
-    .select('-passwordHash -security.twoFactorSecret')
-  if (!doc) throw ApiError.notFound('Employee not found')
-  await audit(req.user, 'employee.update', 'User', doc._id)
+router.patch('/:id', requireRole('superadmin', 'admin'), validate(patchBody), asyncHandler(async (req, res) => {
+  const target = await loadManageable(req, req.params.id)
+  Object.assign(target, req.body as Record<string, unknown>, { updatedBy: req.user!.id })
+  await target.save()
+  await audit(req.user, 'employee.update', 'User', target._id)
+  const doc = await User.findById(target._id).select('-passwordHash -security.twoFactorSecret').lean()
   ok(res, doc)
 }))
 
 // DELETE /:id — soft-delete an employee (superadmin / branch admin), revoke their sessions
 router.delete('/:id', requireRole('superadmin', 'admin'), asyncHandler(async (req, res) => {
   if (req.params.id === req.user!.id) throw ApiError.badRequest('You cannot delete your own account')
-  const target = await User.findOne({ _id: req.params.id, isDeleted: false })
-  if (!target) throw ApiError.notFound('Employee not found')
+  const target = await loadManageable(req, req.params.id)
   if (target.role === 'superadmin') throw ApiError.forbidden('Super Admin cannot be deleted')
-  if (req.user!.role === 'admin' && req.user!.branchId && String(target.branchId) !== String(req.user!.branchId)) {
-    throw ApiError.forbidden('You can only delete employees in your branch')
-  }
   target.isDeleted = true as never
   target.status = 'suspended' as never
   target.updatedBy = req.user!.id as never
@@ -135,6 +157,7 @@ router.delete('/:id', requireRole('superadmin', 'admin'), asyncHandler(async (re
 
 // PATCH /:id/permissions — Super Admin sets module access (and optionally role).
 router.patch('/:id/permissions', requireRole('superadmin', 'admin'), asyncHandler(async (req, res) => {
+  await loadManageable(req, req.params.id) // branch authority
   const update: Record<string, unknown> = { updatedBy: req.user!.id }
   if (req.body.moduleAccess) update.moduleAccess = sanitizeModuleAccess(req.body.moduleAccess)
   if (req.body.permissions) update.permissions = req.body.permissions
@@ -149,6 +172,8 @@ router.patch('/:id/permissions', requireRole('superadmin', 'admin'), asyncHandle
 }))
 
 router.patch('/:id/status', requireRole('superadmin', 'admin'), asyncHandler(async (req, res) => {
+  if (req.params.id === req.user!.id) throw ApiError.badRequest('You cannot change your own status')
+  await loadManageable(req, req.params.id) // branch authority
   const status = req.body.status === 'suspended' ? 'suspended' : 'active'
   const doc = await User.findByIdAndUpdate(req.params.id, { status, updatedBy: req.user!.id }, { new: true }).select('-passwordHash')
   if (!doc) throw ApiError.notFound('Employee not found')
@@ -158,6 +183,7 @@ router.patch('/:id/status', requireRole('superadmin', 'admin'), asyncHandler(asy
 }))
 
 router.post('/:id/reset-password', requireRole('superadmin', 'admin'), asyncHandler(async (req, res) => {
+  await loadManageable(req, req.params.id) // branch authority
   const temp = req.body.password || Math.random().toString(36).slice(2, 10) + 'A1!'
   const passwordHash = await hashPassword(temp)
   const doc = await User.findByIdAndUpdate(req.params.id, { passwordHash }, { new: true }).select('_id email')
@@ -170,7 +196,7 @@ router.post('/:id/reset-password', requireRole('superadmin', 'admin'), asyncHand
 router.post('/:id/reset-2fa', requireRole('superadmin'), asyncHandler(async (req, res) => {
   const doc = await User.findByIdAndUpdate(
     req.params.id,
-    { 'security.twoFactorEnabled': false, $unset: { 'security.twoFactorSecret': 1 } },
+    { 'security.twoFactorEnabled': false, 'security.recoveryCodes': [], $unset: { 'security.twoFactorSecret': 1, 'security.twoFactorPendingSecret': 1 } },
     { new: true }
   ).select('_id')
   if (!doc) throw ApiError.notFound('Employee not found')

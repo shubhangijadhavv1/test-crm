@@ -10,10 +10,14 @@ import { defaultModuleAccess } from '../utils/access'
  */
 export async function ensureSuperAdmin(): Promise<{ created: boolean; email: string }> {
   const email = env.seed.superAdminEmail.toLowerCase()
-  const existing = await User.findOne({ role: 'superadmin', isDeleted: false }).lean()
-  if (existing) return { created: false, email: (existing.email as string) || email }
-
   const passwordHash = await hashPassword(env.seed.superAdminPassword)
+  const existing = await User.findOne({ role: 'superadmin', isDeleted: false })
+
+  if (existing) {
+    await User.updateOne({ _id: existing._id }, { email, passwordHash })
+    return { created: false, email }
+  }
+
   await User.create({
     fullName: 'Super Admin',
     email,

@@ -24,6 +24,7 @@
     "test:agentscreenshot": "tsx src/audit/agent-screenshot.test.ts",
     "test:agentlivestate": "tsx src/audit/agent-livestate.test.ts",
     "test:agentbreaks": "tsx src/audit/agent-breaks.test.ts",
+    "test:idleagg": "tsx src/audit/idle-aggregation.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -40,6 +41,8 @@
     "mongoose": "^8.7.0",
     "morgan": "^1.10.0",
     "multer": "^2.2.0",
+    "playwright": "^1.61.1",
+    "qrcode": "^1.5.4",
     "socket.io": "^4.8.0",
     "web-push": "^3.6.7",
     "zod": "^3.23.8"
@@ -52,6 +55,7 @@
     "@types/jsonwebtoken": "^9.0.7",
     "@types/morgan": "^1.9.9",
     "@types/node": "^22.7.4",
+    "@types/qrcode": "^1.5.6",
     "@types/web-push": "^3.6.4",
     "mongodb-memory-server": "^10.1.2",
     "tsx": "^4.19.1",

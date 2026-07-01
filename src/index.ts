@@ -1,3 +1,4 @@
+import './config/tz' // MUST be first — pins the process timezone to India (Asia/Kolkata)
 import http from 'http'
 import { createApp } from './app'
 import { connectDB } from './config/db'
@@ -5,6 +6,7 @@ import { env } from './config/env'
 import { initSocket } from './realtime/socket'
 import { ensureSuperAdmin } from './seed/bootstrap'
 import { startOverdueJob } from './jobs/overdue'
+import { startSiteMonitorJob } from './jobs/siteMonitor'
 import { initWebPush } from './services/webpush'
 import { User } from './models/User'
 import { Project } from './models/Project'
@@ -40,9 +42,11 @@ async function main() {
   const server = http.createServer(app)
   initSocket(server)
   startOverdueJob() // periodic overdue-task sweep
+  startSiteMonitorJob() // periodic website availability monitoring
   initWebPush() // configure VAPID for browser push (no-op if keys absent)
 
   server.listen(env.port, '0.0.0.0', () => {
+    console.log(`[tz] timezone: ${process.env.TZ} (${Intl.DateTimeFormat().resolvedOptions().timeZone}) · now ${new Date().toLocaleString('en-IN')}`)
     console.log(`[api] GDC CRM backend listening on http://localhost:${env.port}/api/v1`)
     console.log(`[api] health: http://localhost:${env.port}/health`)
     if (inMemory) console.log(`[db] uri: ${uri}`)

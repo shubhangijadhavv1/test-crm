@@ -12,6 +12,7 @@ import { audit } from '../utils/audit'
 import { Holiday } from '../models/Branch'
 import { LeaveRequest } from '../models/leave'
 import { isWeeklyOff } from '../utils/weekend'
+import { policyFromBranch, productiveTotals } from '../agent/engine'
 
 const router = Router()
 router.use(requireAuth)
@@ -20,23 +21,37 @@ function todayKey(d = new Date()): string {
   return d.toISOString().slice(0, 10)
 }
 
-/** Recompute totals from segments and apply the branch allowance rule (M7 §6). */
-function recompute(att: { segments: { type: string; seconds?: number }[]; totals: Record<string, number> }, lunchAllowanceSec: number, teaAllowanceSec: number, loginAt?: Date, logoutAt?: Date) {
+/** Recompute totals from segments using the Net Productive Hours model (engine.productiveTotals). */
+function recompute(att: { segments: { type: string; startAt?: Date; endAt?: Date; seconds?: number }[]; totals: Record<string, unknown> }, branch: Parameters<typeof policyFromBranch>[0] | null, loginAt?: Date, logoutAt?: Date) {
   let work = 0, idle = 0, lunch = 0, tea = 0
+  const liveEnd = (logoutAt || new Date()).getTime()
   for (const s of att.segments) {
-    const sec = s.seconds || 0
+    const sec = s.seconds ?? (s.startAt ? Math.max(0, Math.floor((((s.endAt ?? new Date(liveEnd)) as Date).getTime() - (s.startAt as Date).getTime()) / 1000)) : 0)
     if (s.type === 'work') work += sec
     else if (s.type === 'idle') idle += sec
     else if (s.type === 'lunch') lunch += sec
     else if (s.type === 'tea') tea += sec
   }
-  // Extra lunch/tea beyond allowance is reclassified as idle.
-  const extraLunch = Math.max(0, lunch - lunchAllowanceSec)
-  const extraTea = Math.max(0, tea - teaAllowanceSec)
-  idle += extraLunch + extraTea
-  const totalLogged = loginAt && logoutAt ? Math.floor((logoutAt.getTime() - loginAt.getTime()) / 1000) : work + idle + lunch + tea
-  const productive = Math.max(0, totalLogged - idle - lunch - tea)
-  att.totals = { workSeconds: work, idleSeconds: idle, lunchSeconds: lunch, teaSeconds: tea, productiveSeconds: productive }
+  const policy = policyFromBranch((branch || {}) as Parameters<typeof policyFromBranch>[0])
+  const presence = work + idle + lunch + tea // web punch has no clocked-out gaps within the session
+  const p = productiveTotals({
+    clockIn: loginAt || new Date(),
+    spanSeconds: presence,
+    idleSeconds: idle,
+    lunchSeconds: lunch,
+    teaSeconds: tea,
+    policy,
+  })
+  att.totals = {
+    workSeconds: p.netProductiveSeconds, productiveSeconds: p.netProductiveSeconds,
+    idleSeconds: p.idleSeconds, lunchSeconds: p.countedLunchSeconds, teaSeconds: p.countedTeaSeconds,
+    requiredSeconds: p.requiredProductiveSeconds, remainingSeconds: p.remainingProductiveSeconds,
+    overtimeSeconds: p.overtimeSeconds, completionPct: p.completionPct, shiftLenSeconds: p.shiftLenSeconds,
+    actualLunchSeconds: lunch, actualTeaSeconds: tea,
+    allowedLunchSeconds: p.allowedLunchSeconds, allowedTeaSeconds: p.allowedTeaSeconds,
+    extraLunchSeconds: p.extraLunchSeconds, extraTeaSeconds: p.extraTeaSeconds,
+    extraBreakSeconds: p.extraBreakSeconds, expectedLogout: p.expectedLogout,
+  }
 }
 
 const punchBody = z.object({ action: z.enum(['in', 'out', 'lunch_in', 'lunch_out', 'tea_in', 'tea_out']), workMode: z.enum(['office', 'wfh', 'hybrid']).optional() })
@@ -68,6 +83,15 @@ router.post('/punch', validate(punchBody), asyncHandler(async (req, res) => {
     }
   }
 
+  // One lunch + one tea per day (mirror the desktop-agent rule). A break can only be
+  // started once you're clocked in, after finishing any open break, and not a second time.
+  if (action === 'lunch_in' || action === 'tea_in') {
+    const type = action === 'lunch_in' ? 'lunch' : 'tea'
+    if (!att.loginAt) throw ApiError.badRequest('Punch in before taking a break')
+    if (att.segments.some(s => !s.endAt && (s.type === 'lunch' || s.type === 'tea'))) throw ApiError.conflict('Finish your current break first')
+    if (att.segments.some(s => s.type === type)) throw ApiError.conflict(`You have already taken your ${type} break today`)
+  }
+
   switch (action) {
     case 'in':
       if (!att.loginAt) {
@@ -93,7 +117,7 @@ router.post('/punch', validate(punchBody), asyncHandler(async (req, res) => {
   }
   if (workMode) att.workMode = workMode as never
   att.source = 'web' as never // a manual web punch marks the session as web (so it shows live without an agent heartbeat)
-  recompute(att as never, lunchAllowance, teaAllowance, att.loginAt || undefined, att.logoutAt || undefined)
+  recompute(att as never, (branch as Parameters<typeof policyFromBranch>[0]) || null, att.loginAt || undefined, att.logoutAt || undefined)
   await att.save()
   ok(res, att)
 }))
@@ -147,9 +171,10 @@ const fmtDate = (d: unknown) => new Date(d as Date).toISOString().slice(0, 10)
 const shiftSeconds = (branch: { shift?: { startTime?: string; endTime?: string }; breaks?: { lunchMinutes?: number; teaMinutes?: number } } | null) => {
   const [sh, sm] = (branch?.shift?.startTime || '09:00').split(':').map(Number)
   const [eh, em] = (branch?.shift?.endTime || '18:00').split(':').map(Number)
-  const len = Math.max(0, (eh * 60 + em) - (sh * 60 + sm)) * 60
-  const breaks = ((branch?.breaks?.lunchMinutes || 0) + (branch?.breaks?.teaMinutes || 0)) * 60
-  return Math.max(0, len - breaks) // required productive seconds per working day
+  // Required work = the FULL shift window (no break subtraction). Policy: an employee must
+  // complete a full shift of ACTUAL work; idle/lunch/break are tracked separately and do not
+  // reduce the target. Keeps this in step with the Live dashboard (target = full shift).
+  return Math.max(0, (eh * 60 + em) - (sh * 60 + sm)) * 60
 }
 
 // GET /attendance/monthly?month=YYYY-MM&branchId= — grid: every employee × every day status (admin)
@@ -234,7 +259,9 @@ router.get('/report', asyncHandler(async (req, res) => {
     const t = rec?.totals as { workSeconds?: number; idleSeconds?: number; lunchSeconds?: number; teaSeconds?: number } | undefined
     const workSec = t?.workSeconds || 0
     const isWorkingDay = !['holiday', 'weekoff', 'leave', 'future'].includes(status)
-    const halfDay = status === 'present' && workSec > 0 && workSec < requiredSec * 0.5
+    // A LATE arrival is never auto-downgraded to half-day — it's marked Present + Late.
+    // Half-day applies only to a non-late present day with under half the required work.
+    const halfDay = status === 'present' && !rec?.lateMark && workSec > 0 && workSec < requiredSec * 0.5
     if (status === 'present') { sum.present++; if (halfDay) sum.halfday++ }
     if (status === 'absent') sum.absent++
     if (status === 'leave') sum.leave++
@@ -250,6 +277,7 @@ router.get('/report', asyncHandler(async (req, res) => {
       requiredSec: isWorkingDay ? requiredSec : 0,
       remainingSec: isWorkingDay ? Math.max(0, requiredSec - workSec) : 0,
       lateSec: rec?.lateBySeconds || 0, lateMark: !!rec?.lateMark,
+      overridden: !!rec?.overridden, attId: rec?._id || null,
     })
   }
   const efficiency = sum.requiredSec ? Math.round((sum.workSec / sum.requiredSec) * 100) : 0
@@ -264,6 +292,50 @@ router.get('/', requireRole('superadmin', 'admin'), asyncHandler(async (req, res
   if (req.query.branchId) filter.branchId = req.query.branchId
   const rows = await Attendance.find(filter).populate('userId', 'fullName department workMode avatarColor').lean()
   ok(res, rows)
+}))
+
+// POST /attendance/override — SUPER ADMIN ONLY: manually set/correct one employee's day.
+// Upserts the record for userId+date and overrides the chosen fields (times, status, late, work).
+const overrideBody = z.object({
+  userId: z.string(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  loginAt: z.coerce.date().nullable().optional(),
+  logoutAt: z.coerce.date().nullable().optional(),
+  status: z.enum(['present', 'absent', 'leave', 'holiday', 'weekoff']).optional(),
+  workMode: z.enum(['office', 'wfh', 'hybrid']).optional(),
+  lateMark: z.boolean().optional(),
+  lateBySeconds: z.number().min(0).optional(),
+  workSeconds: z.number().min(0).optional(),
+  idleSeconds: z.number().min(0).optional(),
+  note: z.string().max(500).optional(),
+})
+router.post('/override', requireRole('superadmin'), validate(overrideBody), asyncHandler(async (req, res) => {
+  const b = req.body as z.infer<typeof overrideBody>
+  const user = await User.findById(b.userId).select('branchId isDeleted').lean()
+  if (!user || (user as { isDeleted?: boolean }).isDeleted) throw ApiError.notFound('Employee not found')
+  const att = await Attendance.findOneAndUpdate(
+    { userId: b.userId, date: b.date },
+    { $setOnInsert: { userId: b.userId, branchId: user.branchId, date: b.date, source: 'web', segments: [] } },
+    { upsert: true, new: true },
+  )
+  if (b.loginAt !== undefined) att.loginAt = b.loginAt as never
+  if (b.logoutAt !== undefined) att.logoutAt = b.logoutAt as never
+  if (b.status) att.status = b.status as never
+  if (b.workMode) att.workMode = b.workMode as never
+  if (b.lateMark !== undefined) att.lateMark = b.lateMark
+  if (b.lateBySeconds !== undefined) att.lateBySeconds = b.lateBySeconds
+  if (b.workSeconds !== undefined || b.idleSeconds !== undefined) {
+    const t = (att.totals || {}) as Record<string, number>
+    if (b.workSeconds !== undefined) { t.workSeconds = b.workSeconds; t.productiveSeconds = b.workSeconds }
+    if (b.idleSeconds !== undefined) t.idleSeconds = b.idleSeconds
+    att.totals = t as never
+  }
+  att.overridden = true as never
+  att.overrideNote = (b.note || '') as never
+  att.updatedBy = req.user!.id as never
+  await att.save()
+  await audit(req.user, 'attendance.override', 'Attendance', att._id, { after: b })
+  ok(res, att)
 }))
 
 // PATCH /attendance/:id/regularize (admin, audited)

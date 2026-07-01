@@ -18,17 +18,24 @@ const branchBody = z.object({
   code: z.string().optional(),
   timezone: z.string().optional(),
   shift: z.object({ startTime: z.string(), endTime: z.string(), graceMinutes: z.number() }).partial().optional(),
-  breaks: z.object({ lunchMinutes: z.number(), teaMinutes: z.number() }).partial().optional(),
+  breaks: z.object({ lunchMinutes: z.number(), teaMinutes: z.number(), billingModel: z.enum(['A', 'B']) }).partial().optional(),
+  monitoring: z.object({
+    idleThresholdMinutes: z.number().min(0),
+    halfDayAfterMinutes: z.number().min(0),
+    screenshotIntervalMinutes: z.number().min(0),
+  }).partial().optional(),
   weekend: z.object({
     sundayOff: z.boolean(),
     saturdayWeeks: z.array(z.number().int().min(1).max(5)),
   }).partial().optional(),
   leaveAllocation: z.object({ paid: z.number(), sick: z.number(), casual: z.number() }).partial().optional(),
+  isActive: z.boolean().optional(),
   allowedIps: z.array(z.string()).optional(),
-})
+}).strict()
+const branchPatchBody = branchBody.partial()
 
-// GET /branches — list with employee counts
-router.get('/', asyncHandler(async (_req, res) => {
+// GET /branches — list with employee counts. allowedIps (sensitive) only for Super Admin.
+router.get('/', asyncHandler(async (req, res) => {
   const branches = await Branch.find({ isDeleted: false }).sort({ name: 1 }).lean()
   const counts = await User.aggregate([
     { $match: { isDeleted: false } },
@@ -36,7 +43,13 @@ router.get('/', asyncHandler(async (_req, res) => {
   ])
   const map: Record<string, number> = {}
   counts.forEach(c => { if (c._id) map[String(c._id)] = c.n })
-  ok(res, branches.map(b => ({ ...b, emps: map[String(b._id)] || 0, weekendLabel: weekendLabel(b.weekend) })))
+  const isSuper = req.user!.role === 'superadmin'
+  ok(res, branches.map(b => ({
+    ...b,
+    allowedIps: isSuper ? b.allowedIps : undefined, // don't leak the IP allowlist to non-super-admins
+    emps: map[String(b._id)] || 0,
+    weekendLabel: weekendLabel(b.weekend),
+  })))
 }))
 
 router.post('/', requireRole('superadmin'), validate(branchBody), asyncHandler(async (req, res) => {
@@ -45,7 +58,7 @@ router.post('/', requireRole('superadmin'), validate(branchBody), asyncHandler(a
   created(res, doc)
 }))
 
-router.patch('/:id', requireRole('superadmin'), asyncHandler(async (req, res) => {
+router.patch('/:id', requireRole('superadmin'), validate(branchPatchBody), asyncHandler(async (req, res) => {
   const before = await Branch.findById(req.params.id).lean()
   const doc = await Branch.findByIdAndUpdate(req.params.id, { ...req.body, updatedBy: req.user!.id }, { new: true })
   if (!doc) throw ApiError.notFound('Branch not found')

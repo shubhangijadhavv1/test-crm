@@ -23,3 +23,17 @@ export function verifyAccess(token: string): AccessPayload {
 export function verifyRefresh(token: string): { sub: string; sid: string } {
   return jwt.verify(token, env.jwt.refreshSecret) as { sub: string; sid: string }
 }
+
+/**
+ * Short-lived token proving the password step passed, pending a 2FA code.
+ * Not a session token — it only authorises POST /auth/2fa/verify.
+ */
+export function signMfaChallenge(sub: string): string {
+  return jwt.sign({ sub, typ: 'mfa' }, env.jwt.accessSecret, { expiresIn: '5m' } as SignOptions)
+}
+
+export function verifyMfaChallenge(token: string): { sub: string } {
+  const p = jwt.verify(token, env.jwt.accessSecret) as { sub: string; typ?: string }
+  if (p.typ !== 'mfa') throw new Error('Not an MFA challenge token')
+  return { sub: p.sub }
+}

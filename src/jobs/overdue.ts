@@ -36,9 +36,9 @@ export async function sweepOverdue(): Promise<number> {
       await task.save()
       changed++
       emitScoped('task:moved', { id: task._id, status: 'overdue' }, { branchId: task.branchId, userId: task.assigneeId })
-      if (task.assigneeId) await notify(String(task.assigneeId), { type: 'task.overdue', title: 'Task overdue', body: task.title, color: 'bad' })
+      if (task.assigneeId) await notify(String(task.assigneeId), { type: 'task.overdue', title: 'Task overdue', body: task.title, color: 'bad', link: '/kanban' })
       if (task.assignerId && String(task.assignerId) !== String(task.assigneeId)) {
-        await notify(String(task.assignerId), { type: 'task.overdue', title: 'Assigned task overdue', body: task.title, color: 'bad' })
+        await notify(String(task.assignerId), { type: 'task.overdue', title: 'Assigned task overdue', body: task.title, color: 'bad', link: '/kanban' })
       }
     }
     if (changed) cacheClear('dashboard')
@@ -62,7 +62,7 @@ export async function sweepReminders(): Promise<number> {
     reminderSentAt: { $exists: false },
   })
   for (const task of upcoming) {
-    if (task.assigneeId) await notify(String(task.assigneeId), { type: 'task.reminder', title: 'Task due soon', body: `${task.title} is due within 24 hours`, color: 'warn' })
+    if (task.assigneeId) await notify(String(task.assigneeId), { type: 'task.reminder', title: 'Task due soon', body: `${task.title} is due within 24 hours`, color: 'warn', link: '/kanban' })
     task.reminderSentAt = now as never
     await task.save()
   }

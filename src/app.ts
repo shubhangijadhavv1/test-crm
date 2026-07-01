@@ -25,6 +25,7 @@ import announcementRoutes from './modules/announcements'
 import notificationRoutes from './modules/notifications'
 import dashboardRoutes from './modules/dashboard'
 import pushRoutes from './modules/push'
+import siteRoutes from './modules/sites'
 
 export function createApp() {
   const app = express()
@@ -35,7 +36,17 @@ export function createApp() {
     crossOriginOpenerPolicy: false,
     originAgentCluster: false,
   }))
-  app.use(cors({ origin: (origin, cb) => cb(null, true), credentials: true }))
+  // CORS: if GDC_CORS_ORIGINS is set (comma-separated), only those origins may send credentials;
+  // otherwise allow all (dev convenience). Set it in production to lock the API down.
+  const corsAllow = (process.env.GDC_CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean)
+  app.use(cors({
+    origin: (origin, cb) => {
+      if (!corsAllow.length) return cb(null, true) // dev: allow all
+      if (!origin || corsAllow.includes(origin)) return cb(null, true)
+      return cb(new Error('Origin not allowed by CORS'))
+    },
+    credentials: true,
+  }))
   app.use(express.json({ limit: '1mb' }))
   app.use(cookieParser())
   app.use(mongoSanitize() as unknown as express.RequestHandler) // strip $ / . from body, query & params → blocks NoSQL operator injection
@@ -66,6 +77,7 @@ export function createApp() {
   api.use('/notifications', notificationRoutes)
   api.use('/dashboard', dashboardRoutes)
   api.use('/push', pushRoutes)
+  api.use('/sites', siteRoutes)
 
   app.use('/api/v1', api)
 

@@ -6,7 +6,7 @@ import { Task } from '../models/Task'
 import { ok, created, asyncHandler } from '../utils/http'
 import { validate } from '../middleware/validate'
 import { requireAuth } from '../middleware/auth'
-import { requireRole } from '../middleware/rbac'
+import { requireRole, branchFilter } from '../middleware/rbac'
 import { ApiError } from '../utils/ApiError'
 import { audit } from '../utils/audit'
 import { notify } from '../utils/notify'
@@ -144,7 +144,8 @@ router.delete('/checklist-points/:id', requireRole('superadmin', 'admin'), async
 // ----- Checklist templates (legacy) -----
 // ----- QA register -----
 router.get('/qa', asyncHandler(async (req, res) => {
-  const filter: Record<string, unknown> = { isDeleted: false }
+  // Branch-scoped: non-super-admins only see their own branch's QA (fail-closed if no branch).
+  const filter: Record<string, unknown> = { isDeleted: false, ...branchFilter(req) }
   if (req.query.state) filter.state = req.query.state
   const rows = await QaProcess.find(filter)
     .populate({ path: 'projectId', select: 'name url type categoryId', populate: { path: 'categoryId', select: 'name' } })
@@ -157,6 +158,10 @@ router.get('/qa', asyncHandler(async (req, res) => {
 router.get('/qa/:id', asyncHandler(async (req, res) => {
   const doc = await QaProcess.findById(req.params.id).populate('projectId', 'name url').lean()
   if (!doc) throw ApiError.notFound('QA process not found')
+  // Branch authority: non-super-admins can only read their own branch's QA.
+  if (req.user!.role !== 'superadmin' && req.user!.branchId && String(doc.branchId) !== String(req.user!.branchId)) {
+    throw ApiError.forbidden('Not permitted')
+  }
   ok(res, doc)
 }))
 
@@ -249,7 +254,7 @@ router.post('/qa/:id/stage2/assign', validate(assignBody), asyncHandler(async (r
   // Linked task so Checklist 2 appears on the reviewer's Task Board.
   const proj = await Project.findById(qa.projectId).select('name branchId').lean()
   await ensureChecklistTask({ qaId: qa._id, stage: 2, assigneeId: reviewerId, assignerId: req.user!.id, projectId: qa.projectId, projectName: proj?.name, branchId: proj?.branchId })
-  await notify(reviewerId, { type: 'qa.stage2_assigned', title: 'Checklist 2 assigned', body: `Independent QA review for ${proj?.name || 'a project'}`, color: 'brand' })
+  await notify(reviewerId, { type: 'qa.stage2_assigned', title: 'Checklist 2 assigned', body: `Independent QA review for ${proj?.name || 'a project'}`, color: 'brand', link: '/checklists' })
   await audit(req.user, 'qa.stage2.assign', 'QaProcess', qa._id, { after: { reviewerId } })
   ok(res, qa)
 }))

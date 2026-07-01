@@ -20,7 +20,10 @@ const branchSchema = new Schema(
     },
     // Idle / half-day / screenshot settings for the desktop agent's work-time engine.
     monitoring: {
-      idleThresholdMinutes: { type: Number, default: 5 },
+      // Idle threshold in SECONDS — how long with no keyboard/mouse before time counts as idle.
+      // Kept in seconds (not minutes) so short, responsive thresholds like 10s are expressible.
+      idleThresholdSeconds: { type: Number, default: 10 },
+      idleThresholdMinutes: { type: Number, default: 5 }, // legacy; superseded by idleThresholdSeconds
       halfDayAfterMinutes: { type: Number, default: 0 }, // 0 = disabled
       screenshotIntervalMinutes: { type: Number, default: 10 },
     },

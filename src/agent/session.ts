@@ -1,7 +1,7 @@
 import { Attendance } from '../models/Attendance'
 import { Branch } from '../models/Branch'
 import { ActivityTick } from '../models/ActivityTick'
-import { computeDay, policyFromBranch } from './engine'
+import { computeDay, policyFromBranch, productiveTotals } from './engine'
 
 /**
  * Recompute Attendance.totals + lateMark — SEGMENT-BASED, so multiple clock-in/out
@@ -36,27 +36,51 @@ export async function recomputeSession(attendanceId: unknown) {
     else if (s.type === 'tea') teaTaken += sec
   }
 
-  // Pure idle = idle heartbeats × 60s. These occur DURING work segments (agent pauses
-  // idle while on break), so they're the only thing subtracted from work.
-  const idleTicks = await ActivityTick.countDocuments({ attendanceId, isIdle: true })
-  const pureIdle = idleTicks * 60
+  // Pure idle = exact idle seconds the agent measured, summed over EVERY tick — not only
+  // ticks flagged isIdle. A tick carries the precise idle it accrued in its window even when
+  // it ENDS active (user idle for a few seconds, then moved the mouse before the heartbeat):
+  // that idle is real and must be kept, or it's silently lost on the next refresh. Legacy
+  // ticks have no idleSeconds → fall back to isIdle×60; break ticks store idleSeconds 0.
+  const [idleAgg] = await ActivityTick.aggregate<{ idle: number }>([
+    { $match: { attendanceId } },
+    { $group: { _id: null, idle: { $sum: { $ifNull: ['$idleSeconds', { $cond: ['$isIdle', 60, 0] }] } } } },
+  ])
+  const pureIdle = idleAgg?.idle || 0
 
-  // Break time is in its OWN segments (never part of work). Valid (within allowance) breaks
-  // are paid; the overage beyond allowance is reclassified as idle.
-  const lunchAllow = policy.breakAllowanceSeconds.lunch || 0
-  const teaAllow = policy.breakAllowanceSeconds.tea || 0
-  const overage = Math.max(0, lunchTaken - lunchAllow) + Math.max(0, teaTaken - teaAllow)
-
-  const net = Math.max(0, workSeg - pureIdle) // work excludes idle ONLY (breaks aren't in work)
-  const idle = policy.billingModel === 'A'
-    ? pureIdle + lunchTaken + teaTaken // Model A: all break time unpaid
-    : pureIdle + overage              // Model B (default): only break overage is idle
+  // Net Productive Hours model — single source of truth (engine.productiveTotals).
+  // pureIdle is the EXACT agent-measured idle (sum of per-tick idleSeconds), never rounded.
+  // Presence = Σ segment durations (work + breaks) — excludes clocked-out gaps, and an open
+  // segment is capped at liveEnd so a crashed/quit agent stops accruing.
+  const presence = workSeg + lunchTaken + teaTaken
+  const p = productiveTotals({
+    clockIn: att.loginAt as Date,
+    spanSeconds: presence,
+    idleSeconds: pureIdle,
+    lunchSeconds: lunchTaken,
+    teaSeconds: teaTaken,
+    policy,
+  })
   att.totals = {
-    workSeconds: net,
-    idleSeconds: idle,
-    lunchSeconds: policy.billingModel === 'A' ? 0 : Math.min(lunchTaken, lunchAllow),
-    teaSeconds: policy.billingModel === 'A' ? 0 : Math.min(teaTaken, teaAllow),
-    productiveSeconds: net,
+    // workSeconds / productiveSeconds = Net Productive (full breaks + idle removed).
+    workSeconds: p.netProductiveSeconds,
+    productiveSeconds: p.netProductiveSeconds,
+    idleSeconds: p.idleSeconds, // exact pure idle, to the second
+    lunchSeconds: p.countedLunchSeconds,
+    teaSeconds: p.countedTeaSeconds,
+    // Net Productive model fields (live dashboards read these directly).
+    requiredSeconds: p.requiredProductiveSeconds,
+    remainingSeconds: p.remainingProductiveSeconds,
+    overtimeSeconds: p.overtimeSeconds,
+    completionPct: p.completionPct,
+    shiftLenSeconds: p.shiftLenSeconds,
+    actualLunchSeconds: lunchTaken,
+    actualTeaSeconds: teaTaken,
+    allowedLunchSeconds: p.allowedLunchSeconds,
+    allowedTeaSeconds: p.allowedTeaSeconds,
+    extraLunchSeconds: p.extraLunchSeconds,
+    extraTeaSeconds: p.extraTeaSeconds,
+    extraBreakSeconds: p.extraBreakSeconds,
+    expectedLogout: p.expectedLogout,
   } as never
 
   // Late mark is based on the FIRST clock-in of the day.

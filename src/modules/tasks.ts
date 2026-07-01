@@ -117,7 +117,7 @@ router.post('/', validate(createBody), asyncHandler(async (req, res) => {
     timer: { running: false, accumulatedSeconds: 0 },
     createdBy: req.user!.id,
   })
-  await notify(body.assigneeId, { type: 'task.assigned', title: 'New task assigned', body: body.title, color: 'info' })
+  await notify(body.assigneeId, { type: 'task.assigned', title: 'New task assigned', body: body.title, color: 'info', link: '/kanban' })
   await audit(req.user, 'task.create', 'Task', doc._id)
   cacheClear('dashboard') // counters changed
   emitScoped('task:moved', { id: doc._id }, { branchId: doc.branchId, userId: doc.assigneeId })
@@ -144,7 +144,7 @@ router.patch('/:id', asyncHandler(async (req, res) => {
   if (reassigned) {
     const assignee = await User.findById(body.assigneeId).select('branchId').lean()
     if (assignee?.branchId) task.branchId = assignee.branchId as never
-    await notify(String(body.assigneeId), { type: 'task.assigned', title: 'Task assigned to you', body: task.title, color: 'info' })
+    await notify(String(body.assigneeId), { type: 'task.assigned', title: 'Task assigned to you', body: task.title, color: 'info', link: '/kanban' })
   }
   task.updatedBy = req.user!.id as never
   task.increment() // bump version for optimistic concurrency
@@ -171,7 +171,7 @@ router.patch('/:id/move', validate(moveBody), asyncHandler(async (req, res) => {
   emitScoped('task:moved', { id: task._id, status }, { branchId: task.branchId, userId: task.assigneeId })
   // Keep the assigner informed of progress they didn't make themselves.
   if (status !== prev && task.assignerId && String(task.assignerId) !== req.user!.id) {
-    await notify(String(task.assignerId), { type: 'task.status', title: 'Task status changed', body: `${task.title} → ${status}`, color: status === 'done' ? 'ok' : 'info' })
+    await notify(String(task.assignerId), { type: 'task.status', title: 'Task status changed', body: `${task.title} → ${status}`, color: status === 'done' ? 'ok' : 'info', link: '/kanban' })
   }
   await audit(req.user, 'task.move', 'Task', task._id, { before: { status: prev }, after: { status } })
   ok(res, { ...task.toObject(), liveSeconds: liveSeconds(task) })
@@ -223,7 +223,7 @@ router.post('/bulk', validate(bulkBody), asyncHandler(async (req, res) => {
     await task.save()
     affected++
     emitScoped('task:moved', { id: task._id }, { branchId: task.branchId, userId: task.assigneeId })
-    if (action === 'reassign') await notify(String(assigneeId), { type: 'task.assigned', title: 'Task assigned to you', body: task.title, color: 'info' })
+    if (action === 'reassign') await notify(String(assigneeId), { type: 'task.assigned', title: 'Task assigned to you', body: task.title, color: 'info', link: '/kanban' })
   }
   await audit(req.user, `task.bulk.${action}`, 'Task', ids.join(','), { after: { affected, skipped } })
   if (affected) cacheClear('dashboard')

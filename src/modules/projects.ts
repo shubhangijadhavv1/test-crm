@@ -7,7 +7,7 @@ import { ok, created, asyncHandler, parsePaging } from '../utils/http'
 import { safeRegex } from '../utils/regex'
 import { validate } from '../middleware/validate'
 import { requireAuth } from '../middleware/auth'
-import { requireRole, branchFilter } from '../middleware/rbac'
+import { requireRole } from '../middleware/rbac'
 import { ApiError } from '../utils/ApiError'
 import { audit } from '../utils/audit'
 import { ensureQaProcess } from './qa'
@@ -42,17 +42,35 @@ const createBody = z.object({
 })
 
 // GET /projects?type=&status=&q=&page=
+/**
+ * Project visibility: the project inventory is company-wide. A non-super-admin sees projects
+ * in their own branch PLUS unassigned projects (no branchId) — the imported inventory has no
+ * branch, so without this branch-scoped users would see nothing. Super admin sees all (or ?branchId).
+ */
+function projectScope(req: import('express').Request): Record<string, unknown> | null {
+  if (req.user!.role === 'superadmin') {
+    const b = (req.query.branchId as string) || ''
+    return b ? { branchId: b } : null
+  }
+  const ors: Record<string, unknown>[] = [{ branchId: { $exists: false } }, { branchId: null }]
+  if (req.user!.branchId) ors.push({ branchId: req.user!.branchId })
+  return { $or: ors }
+}
+
 router.get('/', asyncHandler(async (req, res) => {
   const { page, limit, skip, sort } = parsePaging(req.query as Record<string, unknown>)
-  const filter: Record<string, unknown> = { isDeleted: false, ...branchFilter(req) }
+  const filter: Record<string, unknown> = { isDeleted: false }
   if (req.query.type) filter.type = req.query.type
   if (req.query.status) filter.status = req.query.status
   if (req.query.priority) filter.priority = req.query.priority
   if (req.query.categoryId) filter.categoryId = req.query.categoryId
   if (req.query.serverId) filter.serverId = req.query.serverId
-  // own/assigned projects ('me' resolves to the caller)
   if (req.query.owner) filter.ownerId = req.query.owner === 'me' ? req.user!.id : req.query.owner
-  if (req.query.q) { const rx = safeRegex(req.query.q); filter.$or = [{ name: rx }, { url: rx }] }
+  // Combine branch scope + text search via $and so their $or clauses don't clobber each other.
+  const and: Record<string, unknown>[] = []
+  const scope = projectScope(req); if (scope) and.push(scope)
+  if (req.query.q) { const rx = safeRegex(req.query.q); and.push({ $or: [{ name: rx }, { url: rx }] }) }
+  if (and.length) filter.$and = and
   const [rows, total] = await Promise.all([
     Project.find(filter).populate(populate).sort(sort).skip(skip).limit(limit).lean(),
     Project.countDocuments(filter),
@@ -62,9 +80,15 @@ router.get('/', asyncHandler(async (req, res) => {
 
 // aggregate() does not auto-cast strings to ObjectId, so build the branch match explicitly
 function aggMatch(req: import('express').Request): Record<string, unknown> {
-  const bf = branchFilter(req) as { branchId?: string }
   const match: Record<string, unknown> = { isDeleted: false }
-  if (bf.branchId) match.branchId = new Types.ObjectId(bf.branchId)
+  if (req.user!.role === 'superadmin') {
+    const b = (req.query.branchId as string) || ''
+    if (b) match.branchId = new Types.ObjectId(b)
+  } else {
+    const ors: Record<string, unknown>[] = [{ branchId: { $exists: false } }, { branchId: null }]
+    if (req.user!.branchId) ors.push({ branchId: new Types.ObjectId(req.user!.branchId) })
+    match.$or = ors
+  }
   return match
 }
 

@@ -29,10 +29,13 @@ async function compute(scope: Record<string, unknown>, month: string) {
   const monthStart = new Date(y, m - 1, 1), monthEnd = new Date(y, m, 0)
 
   const [users, branches, attendance, tasks, holidays, leaves] = await Promise.all([
-    User.find({ isDeleted: false, ...scope }).select('fullName department role branchId behaviourScore avatarColor').lean(),
+    // Score employees only — super admins are org-wide, not branch staff, so they're not rated.
+    User.find({ isDeleted: false, role: { $ne: 'superadmin' }, ...scope }).select('fullName department role branchId behaviourScore avatarColor').lean(),
     Branch.find({}).lean(),
     Attendance.find({ date: new RegExp('^' + month) }).lean(),
-    Task.find({ isDeleted: false, createdAt: { $gte: monthStart, $lte: new Date(monthEnd.getTime() + 86400000) } }).select('assigneeId status').lean(),
+    // Tasks DUE this month, up to today — the work actually expected in the period (not merely
+    // created then). Future-due tasks aren't judged yet; tasks with no due date are excluded.
+    Task.find({ isDeleted: false, dueAt: { $gte: monthStart, $lte: new Date(Math.min(monthEnd.getTime() + 86400000, Date.now())) } }).select('assigneeId status').lean(),
     Holiday.find({}).lean(),
     LeaveRequest.find({ status: 'approved', isDeleted: false }).lean(),
   ])
@@ -65,22 +68,31 @@ async function compute(scope: Record<string, unknown>, month: string) {
     const done = uTasks.filter(t => t.status === 'done').length
     const overdue = uTasks.filter(t => t.status === 'overdue').length
 
-    // criteria (0–100)
-    const attendance100 = expected ? clamp((present / expected) * 100) : 100
-    const punctuality100 = present ? clamp((1 - late / present) * 100) : 100
-    const efficiency100 = (work + idle) ? clamp((work / (work + idle)) * 100) : (present ? 50 : 0)
-    const tasks100 = assigned ? clamp(((done - overdue * 0.5) / assigned) * 100) : 100
+    // Each criterion is scored 0–100 and marked APPLICABLE only when there's data to judge it.
+    // A criterion with no data (e.g. no tasks assigned, no idle tracking) is excluded from the
+    // blend and its weight is redistributed — so "no tasks" no longer grants a free 100%.
+    const attendance100 = expected ? clamp((present / expected) * 100) : 0
+    const punctuality100 = present ? clamp((1 - late / present) * 100) : 0
+    const efficiency100 = (work + idle) ? clamp((work / (work + idle)) * 100) : 0
+    const tasks100 = assigned ? clamp(((done - overdue * 0.5) / assigned) * 100) : 0
     const behaviour100 = clamp(u.behaviourScore ?? 75)
+    const metrics = { attendance: attendance100, punctuality: punctuality100, efficiency: efficiency100, tasks: tasks100, behaviour: behaviour100 }
+    const applicable = {
+      attendance: expected > 0,
+      punctuality: present > 0,
+      efficiency: (work + idle) > 0,
+      tasks: assigned > 0,
+      behaviour: true, // manager rating always applies (defaults to 75)
+    }
 
-    const score = clamp(
-      (attendance100 * W.attendance + punctuality100 * W.punctuality + efficiency100 * W.efficiency +
-        tasks100 * W.tasks + behaviour100 * W.behaviour) / 100,
-    )
+    // Weighted average over only the applicable criteria (weights renormalized).
+    const parts = (Object.keys(W) as (keyof typeof W)[]).filter(k => applicable[k])
+    const totalW = parts.reduce((s, k) => s + W[k], 0) || 1
+    const score = clamp(parts.reduce((s, k) => s + metrics[k] * W[k], 0) / totalW)
     return {
       userId: u._id, name: u.fullName, department: u.department, role: u.role, avatarColor: u.avatarColor,
       branchId: u.branchId, branch: branch?.name || '—',
-      score,
-      metrics: { attendance: attendance100, punctuality: punctuality100, efficiency: efficiency100, tasks: tasks100, behaviour: behaviour100 },
+      score, metrics, applicable,
       raw: { workingDays, expected, present, late, overdue, assigned, done, workSeconds: work, idleSeconds: idle },
     }
   }).sort((a, b) => b.score - a.score)
