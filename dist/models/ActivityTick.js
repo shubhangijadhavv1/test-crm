@@ -1,0 +1,40 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.Screenshot = exports.ActivityTick = void 0;
+const mongoose_1 = require("mongoose");
+/**
+ * Raw per-heartbeat fact from the desktop agent (source of truth for recompute).
+ * Counts only — never keystrokes (DPDP-friendly). The aggregation engine derives
+ * Attendance.totals from these; they are recomputable, never hand-edited.
+ */
+const activityTickSchema = new mongoose_1.Schema({
+    attendanceId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Attendance', index: true },
+    userId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', index: true },
+    branchId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Branch', index: true },
+    ts: { type: Date, required: true }, // agent-stamped (immune to upload delay)
+    isIdle: { type: Boolean, default: false },
+    // Exact idle seconds within this minute (0–60), agent-measured. Legacy ticks lack this;
+    // recompute falls back to isIdle×60 when it's absent. This is what makes idle totals
+    // accurate to the second instead of rounding every flagged minute up to a full 60s.
+    idleSeconds: { type: Number, default: null },
+    state: { type: String, enum: ['active', 'idle', 'break'], default: 'active' },
+    activeApp: String,
+    activeTitle: String, // foreground window title
+    activeUrl: String, // browser domain (hostname only — not full URL/content)
+    keyCount: { type: Number, default: 0 }, // counts, not content
+    mouseCount: { type: Number, default: 0 },
+    agentVersion: String,
+}, { timestamps: true });
+activityTickSchema.index({ attendanceId: 1, ts: 1 });
+activityTickSchema.index({ userId: 1, ts: 1 });
+const screenshotSchema = new mongoose_1.Schema({
+    attendanceId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Attendance', index: true },
+    userId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', index: true },
+    ts: { type: Date, required: true },
+    url: String,
+    thumbnailUrl: String,
+    blurred: { type: Boolean, default: false },
+}, { timestamps: true });
+exports.ActivityTick = (0, mongoose_1.model)('ActivityTick', activityTickSchema);
+exports.Screenshot = (0, mongoose_1.model)('Screenshot', screenshotSchema);
+//# sourceMappingURL=ActivityTick.js.map
