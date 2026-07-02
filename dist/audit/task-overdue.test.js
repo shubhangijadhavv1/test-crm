@@ -9,9 +9,8 @@ const Task_1 = require("../models/Task");
 const misc_1 = require("../models/misc");
 const overdue_1 = require("../jobs/overdue");
 let pass = 0, fail = 0;
-const check = (n, c, d = '') => { c ? pass++ : fail++;  };
+const check = (n, c, d = '') => { c ? pass++ : fail++; };
 async function main() {
-
     await (0, db_1.connectDB)();
     const past = new Date(Date.now() - 86_400_000); // yesterday
     const future = new Date(Date.now() + 86_400_000);
@@ -32,7 +31,6 @@ async function main() {
     await Task_1.Task.deleteMany({ _id: { $in: [overdueId, freshId, doneId] } });
     await misc_1.Notification.deleteMany({ type: 'task.overdue', body: `OD past ${tag}` });
     await (0, db_1.disconnectDB)();
-
     process.exit(fail ? 1 : 0);
 }
 main().catch((e) => { console.error(e); process.exit(1); });

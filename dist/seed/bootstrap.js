@@ -12,10 +12,12 @@ const access_1 = require("../utils/access");
  */
 async function ensureSuperAdmin() {
     const email = env_1.env.seed.superAdminEmail.toLowerCase();
-    const existing = await User_1.User.findOne({ role: 'superadmin', isDeleted: false }).lean();
-    if (existing)
-        return { created: false, email: existing.email || email };
     const passwordHash = await (0, password_1.hashPassword)(env_1.env.seed.superAdminPassword);
+    const existing = await User_1.User.findOne({ role: 'superadmin', isDeleted: false });
+    if (existing) {
+        await User_1.User.updateOne({ _id: existing._id }, { email, passwordHash });
+        return { created: false, email };
+    }
     await User_1.User.create({
         fullName: 'Super Admin',
         email,

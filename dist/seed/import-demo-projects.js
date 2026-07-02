@@ -245,7 +245,6 @@ async function main() {
             created++;
         }
     }
-
     await (0, db_1.disconnectDB)();
     process.exit(0);
 }

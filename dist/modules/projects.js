@@ -40,9 +40,24 @@ const createBody = zod_1.z.object({
     branchId: zod_1.z.string().optional(),
 });
 // GET /projects?type=&status=&q=&page=
+/**
+ * Project visibility: the project inventory is company-wide. A non-super-admin sees projects
+ * in their own branch PLUS unassigned projects (no branchId) — the imported inventory has no
+ * branch, so without this branch-scoped users would see nothing. Super admin sees all (or ?branchId).
+ */
+function projectScope(req) {
+    if (req.user.role === 'superadmin') {
+        const b = req.query.branchId || '';
+        return b ? { branchId: b } : null;
+    }
+    const ors = [{ branchId: { $exists: false } }, { branchId: null }];
+    if (req.user.branchId)
+        ors.push({ branchId: req.user.branchId });
+    return { $or: ors };
+}
 router.get('/', (0, http_1.asyncHandler)(async (req, res) => {
     const { page, limit, skip, sort } = (0, http_1.parsePaging)(req.query);
-    const filter = { isDeleted: false, ...(0, rbac_1.branchFilter)(req) };
+    const filter = { isDeleted: false };
     if (req.query.type)
         filter.type = req.query.type;
     if (req.query.status)
@@ -53,13 +68,19 @@ router.get('/', (0, http_1.asyncHandler)(async (req, res) => {
         filter.categoryId = req.query.categoryId;
     if (req.query.serverId)
         filter.serverId = req.query.serverId;
-    // own/assigned projects ('me' resolves to the caller)
     if (req.query.owner)
         filter.ownerId = req.query.owner === 'me' ? req.user.id : req.query.owner;
+    // Combine branch scope + text search via $and so their $or clauses don't clobber each other.
+    const and = [];
+    const scope = projectScope(req);
+    if (scope)
+        and.push(scope);
     if (req.query.q) {
         const rx = (0, regex_1.safeRegex)(req.query.q);
-        filter.$or = [{ name: rx }, { url: rx }];
+        and.push({ $or: [{ name: rx }, { url: rx }] });
     }
+    if (and.length)
+        filter.$and = and;
     const [rows, total] = await Promise.all([
         Project_1.Project.find(filter).populate(populate).sort(sort).skip(skip).limit(limit).lean(),
         Project_1.Project.countDocuments(filter),
@@ -68,10 +89,18 @@ router.get('/', (0, http_1.asyncHandler)(async (req, res) => {
 }));
 // aggregate() does not auto-cast strings to ObjectId, so build the branch match explicitly
 function aggMatch(req) {
-    const bf = (0, rbac_1.branchFilter)(req);
     const match = { isDeleted: false };
-    if (bf.branchId)
-        match.branchId = new mongoose_1.Types.ObjectId(bf.branchId);
+    if (req.user.role === 'superadmin') {
+        const b = req.query.branchId || '';
+        if (b)
+            match.branchId = new mongoose_1.Types.ObjectId(b);
+    }
+    else {
+        const ors = [{ branchId: { $exists: false } }, { branchId: null }];
+        if (req.user.branchId)
+            ors.push({ branchId: new mongoose_1.Types.ObjectId(req.user.branchId) });
+        match.$or = ors;
+    }
     return match;
 }
 router.get('/analytics/by-employee', (0, http_1.asyncHandler)(async (req, res) => {

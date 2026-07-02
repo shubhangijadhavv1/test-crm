@@ -138,7 +138,8 @@ router.delete('/checklist-points/:id', (0, rbac_1.requireRole)('superadmin', 'ad
 // ----- Checklist templates (legacy) -----
 // ----- QA register -----
 router.get('/qa', (0, http_1.asyncHandler)(async (req, res) => {
-    const filter = { isDeleted: false };
+    // Branch-scoped: non-super-admins only see their own branch's QA (fail-closed if no branch).
+    const filter = { isDeleted: false, ...(0, rbac_1.branchFilter)(req) };
     if (req.query.state)
         filter.state = req.query.state;
     const rows = await qa_1.QaProcess.find(filter)
@@ -152,6 +153,10 @@ router.get('/qa/:id', (0, http_1.asyncHandler)(async (req, res) => {
     const doc = await qa_1.QaProcess.findById(req.params.id).populate('projectId', 'name url').lean();
     if (!doc)
         throw ApiError_1.ApiError.notFound('QA process not found');
+    // Branch authority: non-super-admins can only read their own branch's QA.
+    if (req.user.role !== 'superadmin' && req.user.branchId && String(doc.branchId) !== String(req.user.branchId)) {
+        throw ApiError_1.ApiError.forbidden('Not permitted');
+    }
     (0, http_1.ok)(res, doc);
 }));
 // GET /projects/:id/qa — a project + its QA process (or null) for the QA workflow screen.
@@ -256,7 +261,7 @@ router.post('/qa/:id/stage2/assign', (0, validate_1.validate)(assignBody), (0, h
     // Linked task so Checklist 2 appears on the reviewer's Task Board.
     const proj = await Project_1.Project.findById(qa.projectId).select('name branchId').lean();
     await ensureChecklistTask({ qaId: qa._id, stage: 2, assigneeId: reviewerId, assignerId: req.user.id, projectId: qa.projectId, projectName: proj?.name, branchId: proj?.branchId });
-    await (0, notify_1.notify)(reviewerId, { type: 'qa.stage2_assigned', title: 'Checklist 2 assigned', body: `Independent QA review for ${proj?.name || 'a project'}`, color: 'brand' });
+    await (0, notify_1.notify)(reviewerId, { type: 'qa.stage2_assigned', title: 'Checklist 2 assigned', body: `Independent QA review for ${proj?.name || 'a project'}`, color: 'brand', link: '/checklists' });
     await (0, audit_1.audit)(req.user, 'qa.stage2.assign', 'QaProcess', qa._id, { after: { reviewerId } });
     (0, http_1.ok)(res, qa);
 }));

@@ -48,10 +48,13 @@ function requirePermission(module, action) {
  * to their own branch. Super Admin sees everything.
  */
 function branchScope(req) {
-    if (!req.user || req.user.role === 'superadmin')
+    if (!req.user)
+        return { _id: { $in: [] } }; // unauthenticated → match nothing
+    if (req.user.role === 'superadmin')
         return {};
+    // Fail CLOSED: a non-super-admin with no branch is misconfigured — show nothing, not everything.
     if (!req.user.branchId)
-        return {};
+        return { _id: { $in: [] } };
     return { branchId: req.user.branchId };
 }
 /**

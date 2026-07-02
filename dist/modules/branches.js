@@ -18,16 +18,23 @@ const branchBody = zod_1.z.object({
     code: zod_1.z.string().optional(),
     timezone: zod_1.z.string().optional(),
     shift: zod_1.z.object({ startTime: zod_1.z.string(), endTime: zod_1.z.string(), graceMinutes: zod_1.z.number() }).partial().optional(),
-    breaks: zod_1.z.object({ lunchMinutes: zod_1.z.number(), teaMinutes: zod_1.z.number() }).partial().optional(),
+    breaks: zod_1.z.object({ lunchMinutes: zod_1.z.number(), teaMinutes: zod_1.z.number(), billingModel: zod_1.z.enum(['A', 'B']) }).partial().optional(),
+    monitoring: zod_1.z.object({
+        idleThresholdMinutes: zod_1.z.number().min(0),
+        halfDayAfterMinutes: zod_1.z.number().min(0),
+        screenshotIntervalMinutes: zod_1.z.number().min(0),
+    }).partial().optional(),
     weekend: zod_1.z.object({
         sundayOff: zod_1.z.boolean(),
         saturdayWeeks: zod_1.z.array(zod_1.z.number().int().min(1).max(5)),
     }).partial().optional(),
     leaveAllocation: zod_1.z.object({ paid: zod_1.z.number(), sick: zod_1.z.number(), casual: zod_1.z.number() }).partial().optional(),
+    isActive: zod_1.z.boolean().optional(),
     allowedIps: zod_1.z.array(zod_1.z.string()).optional(),
-});
-// GET /branches — list with employee counts
-router.get('/', (0, http_1.asyncHandler)(async (_req, res) => {
+}).strict();
+const branchPatchBody = branchBody.partial();
+// GET /branches — list with employee counts. allowedIps (sensitive) only for Super Admin.
+router.get('/', (0, http_1.asyncHandler)(async (req, res) => {
     const branches = await Branch_1.Branch.find({ isDeleted: false }).sort({ name: 1 }).lean();
     const counts = await User_1.User.aggregate([
         { $match: { isDeleted: false } },
@@ -36,14 +43,20 @@ router.get('/', (0, http_1.asyncHandler)(async (_req, res) => {
     const map = {};
     counts.forEach(c => { if (c._id)
         map[String(c._id)] = c.n; });
-    (0, http_1.ok)(res, branches.map(b => ({ ...b, emps: map[String(b._id)] || 0, weekendLabel: (0, weekend_1.weekendLabel)(b.weekend) })));
+    const isSuper = req.user.role === 'superadmin';
+    (0, http_1.ok)(res, branches.map(b => ({
+        ...b,
+        allowedIps: isSuper ? b.allowedIps : undefined, // don't leak the IP allowlist to non-super-admins
+        emps: map[String(b._id)] || 0,
+        weekendLabel: (0, weekend_1.weekendLabel)(b.weekend),
+    })));
 }));
 router.post('/', (0, rbac_1.requireRole)('superadmin'), (0, validate_1.validate)(branchBody), (0, http_1.asyncHandler)(async (req, res) => {
     const doc = await Branch_1.Branch.create({ ...req.body, createdBy: req.user.id });
     await (0, audit_1.audit)(req.user, 'branch.create', 'Branch', doc._id, { after: doc });
     (0, http_1.created)(res, doc);
 }));
-router.patch('/:id', (0, rbac_1.requireRole)('superadmin'), (0, http_1.asyncHandler)(async (req, res) => {
+router.patch('/:id', (0, rbac_1.requireRole)('superadmin'), (0, validate_1.validate)(branchPatchBody), (0, http_1.asyncHandler)(async (req, res) => {
     const before = await Branch_1.Branch.findById(req.params.id).lean();
     const doc = await Branch_1.Branch.findByIdAndUpdate(req.params.id, { ...req.body, updatedBy: req.user.id }, { new: true });
     if (!doc)

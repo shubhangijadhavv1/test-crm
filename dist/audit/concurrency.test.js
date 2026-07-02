@@ -18,9 +18,8 @@ async function call(m, p, body, headers = {}) {
     const r = await fetch(BASE + p, { method: m, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sa}`, ...headers }, body: body ? JSON.stringify(body) : undefined });
     return { status: r.status, json: await r.json().catch(() => ({})) };
 }
-const check = (n, c, d = '') => { c ? pass++ : fail++;  };
+const check = (n, c, d = '') => { c ? pass++ : fail++; };
 async function main() {
-
     sa = (await call('POST', '/auth/login', { email: EMAIL, password: PASSWORD })).json.data?.accessToken;
     // ---- Project ----
     const projId = (await call('POST', '/projects', { type: 'demo', name: 'Concurrency Test' })).json.data?._id;
@@ -47,7 +46,6 @@ async function main() {
     await Task_1.Task.deleteMany({ _id: taskId });
     await Project_1.Project.deleteMany({ _id: projId });
     await (0, db_1.disconnectDB)();
-
     process.exit(fail ? 1 : 0);
 }
 main().catch((e) => { console.error(e); process.exit(1); });

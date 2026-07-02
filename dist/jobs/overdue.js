@@ -41,9 +41,9 @@ async function sweepOverdue() {
             changed++;
             (0, socket_1.emitScoped)('task:moved', { id: task._id, status: 'overdue' }, { branchId: task.branchId, userId: task.assigneeId });
             if (task.assigneeId)
-                await (0, notify_1.notify)(String(task.assigneeId), { type: 'task.overdue', title: 'Task overdue', body: task.title, color: 'bad' });
+                await (0, notify_1.notify)(String(task.assigneeId), { type: 'task.overdue', title: 'Task overdue', body: task.title, color: 'bad', link: '/kanban' });
             if (task.assignerId && String(task.assignerId) !== String(task.assigneeId)) {
-                await (0, notify_1.notify)(String(task.assignerId), { type: 'task.overdue', title: 'Assigned task overdue', body: task.title, color: 'bad' });
+                await (0, notify_1.notify)(String(task.assignerId), { type: 'task.overdue', title: 'Assigned task overdue', body: task.title, color: 'bad', link: '/kanban' });
             }
         }
         if (changed)
@@ -69,7 +69,7 @@ async function sweepReminders() {
     });
     for (const task of upcoming) {
         if (task.assigneeId)
-            await (0, notify_1.notify)(String(task.assigneeId), { type: 'task.reminder', title: 'Task due soon', body: `${task.title} is due within 24 hours`, color: 'warn' });
+            await (0, notify_1.notify)(String(task.assigneeId), { type: 'task.reminder', title: 'Task due soon', body: `${task.title} is due within 24 hours`, color: 'warn', link: '/kanban' });
         task.reminderSentAt = now;
         await task.save();
     }

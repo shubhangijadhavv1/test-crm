@@ -30,15 +30,28 @@ const announcements_1 = __importDefault(require("./modules/announcements"));
 const notifications_1 = __importDefault(require("./modules/notifications"));
 const dashboard_1 = __importDefault(require("./modules/dashboard"));
 const push_1 = __importDefault(require("./modules/push"));
+const sites_1 = __importDefault(require("./modules/sites"));
 function createApp() {
     const app = (0, express_1.default)();
-    app.set('trust proxy', 1); // honour X-Forwarded-For so req.ip is the real client IP
+    app.set("trust proxy", 1); // honour X-Forwarded-For so req.ip is the real client IP
     app.use((0, helmet_1.default)({
         contentSecurityPolicy: false,
         crossOriginOpenerPolicy: false,
         originAgentCluster: false,
     }));
-    app.use((0, cors_1.default)({ origin: (origin, cb) => cb(null, true), credentials: true }));
+    // CORS: if GDC_CORS_ORIGINS is set (comma-separated), only those origins may send credentials;
+    // otherwise allow all (dev convenience). Set it in production to lock the API down.
+    const corsAllow = (process.env.GDC_CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+    app.use((0, cors_1.default)({
+        origin: (origin, cb) => {
+            if (!corsAllow.length)
+                return cb(null, true); // dev: allow all
+            if (!origin || corsAllow.includes(origin))
+                return cb(null, true);
+            return cb(new Error('Origin not allowed by CORS'));
+        },
+        credentials: true,
+    }));
     app.use(express_1.default.json({ limit: '1mb' }));
     app.use((0, cookie_parser_1.default)());
     app.use((0, express_mongo_sanitize_1.default)()); // strip $ / . from body, query & params → blocks NoSQL operator injection
@@ -66,15 +79,16 @@ function createApp() {
     api.use('/notifications', notifications_1.default);
     api.use('/dashboard', dashboard_1.default);
     api.use('/push', push_1.default);
+    api.use('/sites', sites_1.default);
     app.use('/api/v1', api);
-    // Serve frontend files from the 'dist' directory
-    app.use(express_1.default.static(path_1.default.join(__dirname, 'dist')));
+    // Serve frontend files from the 'public' directory
+    app.use(express_1.default.static(path_1.default.join(__dirname, '../public')));
     // Handle SPA routing: redirect all non-API requests to index.html
     app.get('*', (req, res, next) => {
         if (req.originalUrl.startsWith('/api')) {
             return next();
         }
-        res.sendFile(path_1.default.join(__dirname, 'dist', 'index.html'));
+        res.sendFile(path_1.default.join(__dirname, '../public', 'index.html'));
     });
     app.use(error_1.notFound);
     app.use(error_1.errorHandler);

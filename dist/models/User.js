@@ -26,6 +26,12 @@ const userSchema = new mongoose_1.Schema({
     security: {
         twoFactorEnabled: { type: Boolean, default: false },
         twoFactorSecret: { type: String, select: false },
+        // Secret generated at "setup" but not yet confirmed by a valid code — becomes
+        // twoFactorSecret once the user verifies enrollment; discarded otherwise.
+        twoFactorPendingSecret: { type: String, select: false },
+        twoFactorEnabledAt: Date,
+        // One-time recovery codes (stored hashed, single-use) for when the phone is lost.
+        recoveryCodes: { type: [String], select: false, default: [] },
         ipAllowList: [String],
         failedLoginCount: { type: Number, default: 0 },
         lockedUntil: Date,
@@ -39,6 +45,8 @@ const userSchema = new mongoose_1.Schema({
     allowedIps: { type: [String], default: [] },
     // Whether the employee may punch in/out from the web (My Workspace). Off → desktop agent only.
     webPunchEnabled: { type: Boolean, default: true },
+    // Whether the desktop agent captures screenshots for this employee (Super Admin toggle).
+    screenshotsEnabled: { type: Boolean, default: true },
     // Per-user module visibility/access decided by Super Admin (Blueprint A3).
     // Super Admin ignores this (full access). Keys map to nav module groups.
     moduleAccess: {

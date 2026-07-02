@@ -34,6 +34,11 @@ const screenshotSchema = new mongoose_1.Schema({
     url: String,
     thumbnailUrl: String,
     blurred: { type: Boolean, default: false },
+    // Multi-monitor: which screen this shot is from (1-based), how many were captured, label.
+    screen: { type: Number, default: 1 },
+    screenCount: { type: Number, default: 1 },
+    primary: { type: Boolean, default: true },
+    label: { type: String, default: '' },
 }, { timestamps: true });
 exports.ActivityTick = (0, mongoose_1.model)('ActivityTick', activityTickSchema);
 exports.Screenshot = (0, mongoose_1.model)('Screenshot', screenshotSchema);

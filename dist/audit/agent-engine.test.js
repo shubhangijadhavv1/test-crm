@@ -15,7 +15,6 @@ const base = {
     shiftStart: '09:00', shiftEnd: '18:00', graceMinutes: 15,
     breakAllowanceSeconds: { lunch: 30 * 60, tea: 15 * 60 }, billingModel: 'B',
 };
-
 // 1) On-time, lunch exactly at allowance, tea overage 5m → Model B
 {
     const r = (0, engine_1.computeDay)({
@@ -69,6 +68,5 @@ const base = {
     const r = (0, engine_1.computeDay)({ clockIn: at('09:00'), clockOut: at('09:10'), ticks: idleTicks(5), breaks: [{ type: 'lunch', seconds: 60 * 60 }], policy: base });
     check('net work clamped at 0', r.netWorkSeconds === 0, `${r.netWorkSeconds}`);
 }
-
 process.exit(fail ? 1 : 0);
 //# sourceMappingURL=agent-engine.test.js.map

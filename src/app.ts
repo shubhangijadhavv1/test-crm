@@ -81,15 +81,15 @@ export function createApp() {
 
   app.use('/api/v1', api)
 
-  // Serve frontend files from the 'dist' directory
-  app.use(express.static(path.join(__dirname, 'dist')))
+  // Serve frontend files from the 'public' directory
+  app.use(express.static(path.join(__dirname, '../public')))
 
   // Handle SPA routing: redirect all non-API requests to index.html
   app.get('*', (req, res, next) => {
     if (req.originalUrl.startsWith('/api')) {
       return next()
     }
-    res.sendFile(path.join(__dirname, 'dist', 'index.html'))
+    res.sendFile(path.join(__dirname, '../public', 'index.html'))
   })
 
   app.use(notFound)

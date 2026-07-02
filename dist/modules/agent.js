@@ -24,6 +24,32 @@ const socket_1 = require("../realtime/socket");
 const router = (0, express_1.Router)();
 router.use(auth_1.requireAuth);
 const dayKey = (d = new Date()) => d.toISOString().slice(0, 10);
+/**
+ * Timezone-aware shift-start instant: HH:MM on the login's calendar day, in the branch's
+ * timezone — so "10:00" means 10:00 in IST (or whatever the branch uses) regardless of where
+ * the server runs (UTC in the cloud, etc.). Avoids the wrong late times you get from the
+ * server's local clock.
+ */
+function shiftStartInTz(loginAt, hhmm, tz) {
+    const [h, m] = (hhmm || '09:00').split(':').map(Number);
+    const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(loginAt);
+    const [Y, M, D] = ymd.split('-').map(Number);
+    const utcGuess = Date.UTC(Y, M - 1, D, h || 0, m || 0);
+    // Offset of tz vs UTC at that wall-clock moment.
+    const offset = new Date(new Date(utcGuess).toLocaleString('en-US', { timeZone: tz })).getTime()
+        - new Date(new Date(utcGuess).toLocaleString('en-US', { timeZone: 'UTC' })).getTime();
+    return new Date(utcGuess - offset);
+}
+/** Fresh, timezone-correct late mark for a session (don't trust possibly-stale stored values). */
+function lateInfo(loginAt, branch) {
+    if (!loginAt || !branch?.shift?.startTime)
+        return { lateMark: false, lateBySeconds: 0 };
+    const tz = branch.timezone || 'Asia/Kolkata';
+    const start = shiftStartInTz(new Date(loginAt), branch.shift.startTime, tz);
+    const grace = (branch.shift.graceMinutes ?? 15) * 60_000;
+    const lateBySeconds = Math.max(0, Math.round((new Date(loginAt).getTime() - start.getTime()) / 1000));
+    return { lateMark: new Date(loginAt).getTime() > start.getTime() + grace, lateBySeconds };
+}
 // Screenshot binaries land under uploads/screenshots (gitignored), served statically.
 exports.SHOT_DIR = path_1.default.join(process.cwd(), 'uploads', 'screenshots');
 fs_1.default.mkdirSync(exports.SHOT_DIR, { recursive: true });
@@ -50,6 +76,34 @@ async function todaySession(userId) {
     }
     return att;
 }
+/** Authoritative session state so the agent can reconcile clock-in / break / clock-out done elsewhere (e.g. web). */
+function sessionState(att) {
+    if (!att)
+        return { open: false, onBreak: false, breakType: null, clockedOut: false, loginAt: null };
+    const openBreak = (att.segments || []).find(s => !s.endAt && (s.type === 'lunch' || s.type === 'tea'));
+    return {
+        open: !!att.loginAt && !att.logoutAt,
+        onBreak: !!openBreak,
+        breakType: openBreak?.type || null,
+        clockedOut: !!att.logoutAt,
+        loginAt: att.loginAt || null,
+    };
+}
+// GET /agent/session — current attendance state (lets the agent sync a web punch-in without ticks)
+router.get('/session', (0, http_1.asyncHandler)(async (req, res) => {
+    const att = await Attendance_1.Attendance.findOne({ userId: req.user.id, date: dayKey() }).lean();
+    (0, http_1.ok)(res, sessionState(att));
+}));
+// GET /agent/my-status — is THIS user's desktop agent running & tracking? (for the web dashboard)
+router.get('/my-status', (0, http_1.asyncHandler)(async (req, res) => {
+    const att = await Attendance_1.Attendance.findOne({ userId: req.user.id, date: dayKey() }).select('_id source loginAt logoutAt').lean();
+    if (!att)
+        return (0, http_1.ok)(res, { connected: false, lastTickAt: null, open: false });
+    const last = await ActivityTick_1.ActivityTick.findOne({ attendanceId: att._id }).sort({ ts: -1 }).select('ts').lean();
+    const lastTickAt = last?.ts || null;
+    const connected = !!lastTickAt && (Date.now() - new Date(lastTickAt).getTime()) < 150_000 && !att.logoutAt;
+    (0, http_1.ok)(res, { connected, lastTickAt, open: !!att.loginAt && !att.logoutAt, source: att.source });
+}));
 // POST /agent/permissions — agent reports its macOS permission status
 const permsBody = zod_1.z.object({ screen: zod_1.z.string().optional(), accessibility: zod_1.z.boolean().optional() });
 router.post('/permissions', (0, validate_1.validate)(permsBody), (0, http_1.asyncHandler)(async (req, res) => {
@@ -61,12 +115,16 @@ router.post('/permissions', (0, validate_1.validate)(permsBody), (0, http_1.asyn
 }));
 // GET /agent/config — capture policy for the caller's branch (agent applies on clock-in)
 router.get('/config', (0, http_1.asyncHandler)(async (req, res) => {
-    const user = await User_1.User.findById(req.user.id).select('branchId').lean();
+    const user = await User_1.User.findById(req.user.id).select('branchId screenshotsEnabled').lean();
     const branch = user?.branchId ? await Branch_1.Branch.findById(user.branchId).select('monitoring').lean() : null;
     const m = branch?.monitoring || {};
+    // Per-employee screenshot toggle (Super Admin): when off, interval 0 = agent captures none.
+    const screenshotsOff = user?.screenshotsEnabled === false;
     (0, http_1.ok)(res, {
-        screenshotIntervalSec: Math.max(0, (m.screenshotIntervalMinutes ?? 10) * 60),
-        idleThresholdSec: Math.max(10, (m.idleThresholdMinutes ?? 5) * 60),
+        screenshotIntervalSec: screenshotsOff ? 0 : Math.max(0, (m.screenshotIntervalMinutes ?? 10) * 60),
+        screenshotsEnabled: !screenshotsOff,
+        // Idle threshold in seconds (default 10s). Existing branches without the field also get 10s.
+        idleThresholdSec: Math.max(5, m.idleThresholdSeconds ?? 10),
     });
 }));
 // POST /agent/clock-in — start a fresh agent session (reopens if the day was already closed)
@@ -192,7 +250,9 @@ router.post('/heartbeat', (0, validate_1.validate)(heartbeatBody), (0, http_1.as
     }));
     await ActivityTick_1.ActivityTick.insertMany(docs, { ordered: false });
     const updated = await (0, session_1.recomputeSession)(att._id);
-    (0, http_1.ok)(res, { accepted: docs.length, totals: updated?.totals });
+    // Authoritative session state so the desktop agent can reconcile when a break is ended /
+    // started / the shift is clocked out from ELSEWHERE (e.g. the web CRM).
+    (0, http_1.ok)(res, { accepted: docs.length, totals: updated?.totals, session: sessionState(updated) });
 }));
 // POST /agent/screenshot/upload — multipart binary (field "shot"); stores file + record
 router.post('/screenshot/upload', upload.single('shot'), (0, http_1.asyncHandler)(async (req, res) => {
@@ -200,9 +260,14 @@ router.post('/screenshot/upload', upload.single('shot'), (0, http_1.asyncHandler
         throw ApiError_1.ApiError.badRequest('No screenshot file');
     const att = await todaySession(req.user.id);
     const url = `/uploads/screenshots/${req.file.filename}`;
+    const b = req.body || {};
+    const screenCount = Math.max(1, Number(b.screenCount) || 1);
     const doc = await ActivityTick_1.Screenshot.create({
         attendanceId: att._id, userId: req.user.id, ts: new Date(),
-        url, thumbnailUrl: url, blurred: req.body?.blurred === 'true',
+        url, thumbnailUrl: url, blurred: b.blurred === 'true',
+        screen: Math.max(1, Number(b.screen) || 1), screenCount,
+        primary: b.primary === undefined ? true : b.primary === 'true',
+        label: typeof b.label === 'string' ? b.label : '',
     });
     (0, http_1.created)(res, doc);
 }));
@@ -231,9 +296,14 @@ async function resolveTarget(req) {
 router.get('/timeline', (0, http_1.asyncHandler)(async (req, res) => {
     const userId = await resolveTarget(req);
     const date = req.query.date || dayKey();
-    const att = await Attendance_1.Attendance.findOne({ userId, date }).lean();
-    if (!att)
+    const existing = await Attendance_1.Attendance.findOne({ userId, date }).select('_id').lean();
+    if (!existing)
         return (0, http_1.ok)(res, { date, userId, session: null, ticks: [], breaks: [], screenshotCount: 0 });
+    // Recompute so the detail page always shows complete, current Net Productive totals
+    // (required / remaining / expected logout) even for sessions saved before this model.
+    await (0, session_1.recomputeSession)(existing._id);
+    const att = (await Attendance_1.Attendance.findById(existing._id).populate('userId', 'fullName department avatarColor').populate('branchId', 'shift breaks timezone').lean());
+    Object.assign(att, lateInfo(att.loginAt, att.branchId)); // fresh, tz-correct late
     const ticks = await ActivityTick_1.ActivityTick.find({ attendanceId: att._id }).sort({ ts: 1 }).select('ts isIdle state activeApp activeTitle activeUrl keyCount mouseCount').lean();
     const screenshotCount = await ActivityTick_1.Screenshot.countDocuments({ attendanceId: att._id });
     const breaks = att.segments.filter(s => s.type === 'lunch' || s.type === 'tea');
@@ -304,11 +374,14 @@ router.get('/summary', (0, http_1.asyncHandler)(async (req, res) => {
     const filter = { date, ...(0, rbac_1.branchScope)(req) };
     if (req.query.branchId && req.user.role === 'superadmin')
         filter.branchId = req.query.branchId;
-    const rows = await Attendance_1.Attendance.find(filter)
-        .populate('userId', 'fullName department avatarColor')
-        .populate('branchId', 'shift breaks') // shift window + break allowances for live remaining-time/allowance math
+    const allRows = await Attendance_1.Attendance.find(filter)
+        .populate('userId', 'fullName department avatarColor isDeleted')
+        .populate('branchId', 'shift breaks timezone') // shift window + break allowances + tz for late/remaining math
         .sort({ lateBySeconds: -1 })
         .lean();
+    // Drop sessions of removed/soft-deleted employees (and orphaned rows whose user is gone),
+    // so deleting a tester actually clears them from the live board.
+    const rows = allRows.filter(r => r.userId && !r.userId.isDeleted);
     // Latest heartbeat tick per session → lets the client tick idle/work live.
     const ids = rows.map(r => r._id);
     const lastTicks = ids.length ? await ActivityTick_1.ActivityTick.aggregate([
@@ -320,6 +393,9 @@ router.get('/summary', (0, http_1.asyncHandler)(async (req, res) => {
     // Expose the currently-open segment + last tick so the client can tick break/idle/work live.
     const out = rows.map(r => ({
         ...r,
+        // Recompute late FRESH (timezone-aware) so the card always shows the real late time,
+        // not a possibly-stale value computed under a different server timezone.
+        ...lateInfo(r.loginAt, r.branchId),
         openSegment: (r.segments || []).find((s) => !s.endAt) || null,
         lastTick: lastMap.get(String(r._id)) || null,
     }));

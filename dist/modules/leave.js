@@ -64,7 +64,7 @@ router.post('/', (0, validate_1.validate)(applyBody), (0, http_1.asyncHandler)(a
     await leave_1.LeaveBalance.updateOne({ userId: req.user.id, year }, { $inc: { [`pending.${balKey(body.type)}`]: days } });
     // notify managers of the same branch
     const managers = await User_1.User.find({ role: { $in: ['admin', 'superadmin'] }, isDeleted: false }).select('_id').lean();
-    await Promise.all(managers.map(m => (0, notify_1.notify)(String(m._id), { type: 'leave.requested', title: 'Leave request', body: `${user?.fullName} requested ${days} day(s) ${body.type}`, color: 'info' })));
+    await Promise.all(managers.map(m => (0, notify_1.notify)(String(m._id), { type: 'leave.requested', title: 'Leave request', body: `${user?.fullName} requested ${days} day(s) ${body.type}`, color: 'info', link: '/attendance' })));
     await (0, audit_1.audit)(req.user, 'leave.apply', 'LeaveRequest', doc._id);
     (0, http_1.created)(res, doc);
 }));
@@ -117,7 +117,7 @@ router.patch('/:id/decision', (0, rbac_1.requireRole)('superadmin', 'admin'), (0
         // release the pending hold
         await leave_1.LeaveBalance.updateOne({ userId: lr.userId, year }, { $inc: { [`pending.${key}`]: -lr.days } });
     }
-    await (0, notify_1.notify)(String(lr.userId), { type: 'leave.decision', title: `Leave ${decision}`, body: note || `Your ${lr.type} leave was ${decision}`, color: decision === 'approved' ? 'ok' : 'bad' });
+    await (0, notify_1.notify)(String(lr.userId), { type: 'leave.decision', title: `Leave ${decision}`, body: note || `Your ${lr.type} leave was ${decision}`, color: decision === 'approved' ? 'ok' : 'bad', link: '/my-workspace' });
     await (0, audit_1.audit)(req.user, 'leave.decision', 'LeaveRequest', lr._id, { after: { decision } });
     (0, http_1.ok)(res, lr);
 }));

@@ -19,9 +19,8 @@ async function call(m, p, body, tok = sa) {
     const r = await fetch(BASE + p, { method: m, headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: `Bearer ${tok}` } : {}) }, body: body ? JSON.stringify(body) : undefined });
     return { status: r.status, json: await r.json().catch(() => ({})) };
 }
-const check = (n, c, d = '') => { c ? pass++ : fail++;  };
+const check = (n, c, d = '') => { c ? pass++ : fail++; };
 async function main() {
-   
     sa = (await call('POST', '/auth/login', { email: EMAIL, password: PASSWORD })).json.data?.accessToken;
     const branchId = (await call('GET', '/branches')).json.data?.[0]?._id;
     const tag = Date.now();
@@ -66,7 +65,6 @@ async function main() {
     await Attendance_1.Attendance.deleteMany({ _id: { $in: [stale._id, today?._id] } });
     await User_1.User.deleteMany({ _id: empId });
     await (0, db_1.disconnectDB)();
-
     process.exit(fail ? 1 : 0);
 }
 main().catch((e) => { console.error(e); process.exit(1); });

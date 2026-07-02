@@ -14,16 +14,18 @@ const audit_1 = require("../utils/audit");
 const Branch_2 = require("../models/Branch");
 const leave_1 = require("../models/leave");
 const weekend_1 = require("../utils/weekend");
+const engine_1 = require("../agent/engine");
 const router = (0, express_1.Router)();
 router.use(auth_1.requireAuth);
 function todayKey(d = new Date()) {
     return d.toISOString().slice(0, 10);
 }
-/** Recompute totals from segments and apply the branch allowance rule (M7 §6). */
-function recompute(att, lunchAllowanceSec, teaAllowanceSec, loginAt, logoutAt) {
+/** Recompute totals from segments using the Net Productive Hours model (engine.productiveTotals). */
+function recompute(att, branch, loginAt, logoutAt) {
     let work = 0, idle = 0, lunch = 0, tea = 0;
+    const liveEnd = (logoutAt || new Date()).getTime();
     for (const s of att.segments) {
-        const sec = s.seconds || 0;
+        const sec = s.seconds ?? (s.startAt ? Math.max(0, Math.floor(((s.endAt ?? new Date(liveEnd)).getTime() - s.startAt.getTime()) / 1000)) : 0);
         if (s.type === 'work')
             work += sec;
         else if (s.type === 'idle')
@@ -33,13 +35,26 @@ function recompute(att, lunchAllowanceSec, teaAllowanceSec, loginAt, logoutAt) {
         else if (s.type === 'tea')
             tea += sec;
     }
-    // Extra lunch/tea beyond allowance is reclassified as idle.
-    const extraLunch = Math.max(0, lunch - lunchAllowanceSec);
-    const extraTea = Math.max(0, tea - teaAllowanceSec);
-    idle += extraLunch + extraTea;
-    const totalLogged = loginAt && logoutAt ? Math.floor((logoutAt.getTime() - loginAt.getTime()) / 1000) : work + idle + lunch + tea;
-    const productive = Math.max(0, totalLogged - idle - lunch - tea);
-    att.totals = { workSeconds: work, idleSeconds: idle, lunchSeconds: lunch, teaSeconds: tea, productiveSeconds: productive };
+    const policy = (0, engine_1.policyFromBranch)((branch || {}));
+    const presence = work + idle + lunch + tea; // web punch has no clocked-out gaps within the session
+    const p = (0, engine_1.productiveTotals)({
+        clockIn: loginAt || new Date(),
+        spanSeconds: presence,
+        idleSeconds: idle,
+        lunchSeconds: lunch,
+        teaSeconds: tea,
+        policy,
+    });
+    att.totals = {
+        workSeconds: p.netProductiveSeconds, productiveSeconds: p.netProductiveSeconds,
+        idleSeconds: p.idleSeconds, lunchSeconds: p.countedLunchSeconds, teaSeconds: p.countedTeaSeconds,
+        requiredSeconds: p.requiredProductiveSeconds, remainingSeconds: p.remainingProductiveSeconds,
+        overtimeSeconds: p.overtimeSeconds, completionPct: p.completionPct, shiftLenSeconds: p.shiftLenSeconds,
+        actualLunchSeconds: lunch, actualTeaSeconds: tea,
+        allowedLunchSeconds: p.allowedLunchSeconds, allowedTeaSeconds: p.allowedTeaSeconds,
+        extraLunchSeconds: p.extraLunchSeconds, extraTeaSeconds: p.extraTeaSeconds,
+        extraBreakSeconds: p.extraBreakSeconds, expectedLogout: p.expectedLogout,
+    };
 }
 const punchBody = zod_1.z.object({ action: zod_1.z.enum(['in', 'out', 'lunch_in', 'lunch_out', 'tea_in', 'tea_out']), workMode: zod_1.z.enum(['office', 'wfh', 'hybrid']).optional() });
 // POST /attendance/punch
@@ -66,6 +81,17 @@ router.post('/punch', (0, validate_1.validate)(punchBody), (0, http_1.asyncHandl
             openSeg.seconds = Math.floor((now.getTime() - new Date(openSeg.startAt).getTime()) / 1000);
         }
     };
+    // One lunch + one tea per day (mirror the desktop-agent rule). A break can only be
+    // started once you're clocked in, after finishing any open break, and not a second time.
+    if (action === 'lunch_in' || action === 'tea_in') {
+        const type = action === 'lunch_in' ? 'lunch' : 'tea';
+        if (!att.loginAt)
+            throw ApiError_1.ApiError.badRequest('Punch in before taking a break');
+        if (att.segments.some(s => !s.endAt && (s.type === 'lunch' || s.type === 'tea')))
+            throw ApiError_1.ApiError.conflict('Finish your current break first');
+        if (att.segments.some(s => s.type === type))
+            throw ApiError_1.ApiError.conflict(`You have already taken your ${type} break today`);
+    }
     switch (action) {
         case 'in':
             if (!att.loginAt) {
@@ -105,7 +131,7 @@ router.post('/punch', (0, validate_1.validate)(punchBody), (0, http_1.asyncHandl
     if (workMode)
         att.workMode = workMode;
     att.source = 'web'; // a manual web punch marks the session as web (so it shows live without an agent heartbeat)
-    recompute(att, lunchAllowance, teaAllowance, att.loginAt || undefined, att.logoutAt || undefined);
+    recompute(att, branch || null, att.loginAt || undefined, att.logoutAt || undefined);
     await att.save();
     (0, http_1.ok)(res, att);
 }));
@@ -260,7 +286,9 @@ router.get('/report', (0, http_1.asyncHandler)(async (req, res) => {
         const t = rec?.totals;
         const workSec = t?.workSeconds || 0;
         const isWorkingDay = !['holiday', 'weekoff', 'leave', 'future'].includes(status);
-        const halfDay = status === 'present' && workSec > 0 && workSec < requiredSec * 0.5;
+        // A LATE arrival is never auto-downgraded to half-day — it's marked Present + Late.
+        // Half-day applies only to a non-late present day with under half the required work.
+        const halfDay = status === 'present' && !rec?.lateMark && workSec > 0 && workSec < requiredSec * 0.5;
         if (status === 'present') {
             sum.present++;
             if (halfDay)
@@ -283,6 +311,7 @@ router.get('/report', (0, http_1.asyncHandler)(async (req, res) => {
             requiredSec: isWorkingDay ? requiredSec : 0,
             remainingSec: isWorkingDay ? Math.max(0, requiredSec - workSec) : 0,
             lateSec: rec?.lateBySeconds || 0, lateMark: !!rec?.lateMark,
+            overridden: !!rec?.overridden, attId: rec?._id || null,
         });
     }
     const efficiency = sum.requiredSec ? Math.round((sum.workSec / sum.requiredSec) * 100) : 0;
@@ -299,6 +328,56 @@ router.get('/', (0, rbac_1.requireRole)('superadmin', 'admin'), (0, http_1.async
         filter.branchId = req.query.branchId;
     const rows = await Attendance_1.Attendance.find(filter).populate('userId', 'fullName department workMode avatarColor').lean();
     (0, http_1.ok)(res, rows);
+}));
+// POST /attendance/override — SUPER ADMIN ONLY: manually set/correct one employee's day.
+// Upserts the record for userId+date and overrides the chosen fields (times, status, late, work).
+const overrideBody = zod_1.z.object({
+    userId: zod_1.z.string(),
+    date: zod_1.z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    loginAt: zod_1.z.coerce.date().nullable().optional(),
+    logoutAt: zod_1.z.coerce.date().nullable().optional(),
+    status: zod_1.z.enum(['present', 'absent', 'leave', 'holiday', 'weekoff']).optional(),
+    workMode: zod_1.z.enum(['office', 'wfh', 'hybrid']).optional(),
+    lateMark: zod_1.z.boolean().optional(),
+    lateBySeconds: zod_1.z.number().min(0).optional(),
+    workSeconds: zod_1.z.number().min(0).optional(),
+    idleSeconds: zod_1.z.number().min(0).optional(),
+    note: zod_1.z.string().max(500).optional(),
+});
+router.post('/override', (0, rbac_1.requireRole)('superadmin'), (0, validate_1.validate)(overrideBody), (0, http_1.asyncHandler)(async (req, res) => {
+    const b = req.body;
+    const user = await User_1.User.findById(b.userId).select('branchId isDeleted').lean();
+    if (!user || user.isDeleted)
+        throw ApiError_1.ApiError.notFound('Employee not found');
+    const att = await Attendance_1.Attendance.findOneAndUpdate({ userId: b.userId, date: b.date }, { $setOnInsert: { userId: b.userId, branchId: user.branchId, date: b.date, source: 'web', segments: [] } }, { upsert: true, new: true });
+    if (b.loginAt !== undefined)
+        att.loginAt = b.loginAt;
+    if (b.logoutAt !== undefined)
+        att.logoutAt = b.logoutAt;
+    if (b.status)
+        att.status = b.status;
+    if (b.workMode)
+        att.workMode = b.workMode;
+    if (b.lateMark !== undefined)
+        att.lateMark = b.lateMark;
+    if (b.lateBySeconds !== undefined)
+        att.lateBySeconds = b.lateBySeconds;
+    if (b.workSeconds !== undefined || b.idleSeconds !== undefined) {
+        const t = (att.totals || {});
+        if (b.workSeconds !== undefined) {
+            t.workSeconds = b.workSeconds;
+            t.productiveSeconds = b.workSeconds;
+        }
+        if (b.idleSeconds !== undefined)
+            t.idleSeconds = b.idleSeconds;
+        att.totals = t;
+    }
+    att.overridden = true;
+    att.overrideNote = (b.note || '');
+    att.updatedBy = req.user.id;
+    await att.save();
+    await (0, audit_1.audit)(req.user, 'attendance.override', 'Attendance', att._id, { after: b });
+    (0, http_1.ok)(res, att);
 }));
 // PATCH /attendance/:id/regularize (admin, audited)
 router.patch('/:id/regularize', (0, rbac_1.requireRole)('superadmin', 'admin'), (0, http_1.asyncHandler)(async (req, res) => {

@@ -21,15 +21,12 @@ async function call(method, path, body, tok = token) {
 function check(name, cond, detail = '') {
     if (cond) {
         pass++;
-      
     }
     else {
         fail++;
-       
     }
 }
 async function main() {
-    
     token = (await call('POST', '/auth/login', { email: EMAIL, password: PASSWORD })).json?.data?.accessToken;
     check('super admin login', !!token);
     // 1) Create a branch with a specific weekend policy: Sundays + 2nd & 4th Saturdays off
@@ -67,7 +64,6 @@ async function main() {
     check('4th Sat (27) = weekoff', stat(27) === 'weekoff', stat(27));
     check('1st Sat (6) NOT weekoff', stat(6) !== 'weekoff', stat(6));
     check('3rd Sat (20) NOT weekoff', stat(20) !== 'weekoff', stat(20));
-   
     process.exit(fail ? 1 : 0);
 }
 main().catch((e) => { console.error(e); process.exit(1); });

@@ -41,7 +41,6 @@ async function main() {
     catch { /* ignore */ }
     const removed = results.reduce((a, r) => a + (r.deletedCount || 0), 0);
     const superAdmins = await User_1.User.countDocuments({ role: 'superadmin' });
-
     await (0, db_1.disconnectDB)();
     process.exit(0);
 }

@@ -15,9 +15,8 @@ async function call(m, p, body) {
     const r = await fetch(BASE + p, { method: m, headers: { 'Content-Type': 'application/json', ...(sa ? { Authorization: `Bearer ${sa}` } : {}) }, body: body ? JSON.stringify(body) : undefined });
     return r.json().catch(() => ({}));
 }
-const check = (n, c, d = '') => { c ? pass++ : fail++;  };
+const check = (n, c, d = '') => { c ? pass++ : fail++; };
 async function main() {
-
     sa = (await call('POST', '/auth/login', { email: 'aarav@gdc.com', password: 'Admin@12345' })).data?.accessToken;
     const shra = (await call('GET', '/employees?q=Shraddha')).data?.[0]?._id;
     const catId = (await call('POST', '/categories', { name: 'ReSync Cat ' + Date.now() })).data._id;
@@ -41,7 +40,6 @@ async function main() {
     await qa_1.ChecklistPoint.deleteMany({ categoryId: catId });
     await catalog_1.Category.deleteMany({ _id: catId });
     await (0, db_1.disconnectDB)();
-  
     process.exit(fail ? 1 : 0);
 }
 main().catch((e) => { console.error(e); process.exit(1); });

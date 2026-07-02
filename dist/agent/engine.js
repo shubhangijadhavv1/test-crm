@@ -19,6 +19,7 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.computeDay = computeDay;
+exports.productiveTotals = productiveTotals;
 exports.policyFromBranch = policyFromBranch;
 /** Build a Date at `HH:MM` on the same calendar day as `ref` (local time). */
 function hhmmOn(ref, hhmm) {
@@ -66,6 +67,43 @@ function computeDay(input) {
         lateMark, lateBySeconds, dayStatus, breakdown,
     };
 }
+function productiveTotals(input) {
+    const shiftStart = hhmmOn(input.clockIn, input.policy.shiftStart);
+    let shiftEnd = hhmmOn(input.clockIn, input.policy.shiftEnd);
+    if (shiftEnd.getTime() <= shiftStart.getTime())
+        shiftEnd = new Date(shiftEnd.getTime() + 24 * 3600_000); // overnight shift
+    const shiftLenSeconds = Math.max(0, Math.round((shiftEnd.getTime() - shiftStart.getTime()) / 1000));
+    const allowedLunchSeconds = input.policy.breakAllowanceSeconds.lunch ?? 0;
+    const allowedTeaSeconds = input.policy.breakAllowanceSeconds.tea ?? 0;
+    const requiredProductiveSeconds = Math.max(0, shiftLenSeconds - allowedLunchSeconds - allowedTeaSeconds);
+    const lunch = Math.max(0, input.lunchSeconds || 0);
+    const tea = Math.max(0, input.teaSeconds || 0);
+    const idle = Math.max(0, Math.round(input.idleSeconds || 0)); // exact seconds, no minute rounding
+    const countedLunchSeconds = Math.min(lunch, allowedLunchSeconds);
+    const countedTeaSeconds = Math.min(tea, allowedTeaSeconds);
+    const extraLunchSeconds = Math.max(0, lunch - allowedLunchSeconds);
+    const extraTeaSeconds = Math.max(0, tea - allowedTeaSeconds);
+    const extraBreakSeconds = extraLunchSeconds + extraTeaSeconds;
+    const spanSeconds = input.spanSeconds != null
+        ? Math.max(0, Math.round(input.spanSeconds))
+        : Math.max(0, Math.round(((input.now?.getTime() ?? Date.now()) - input.clockIn.getTime()) / 1000));
+    // Model A: every break minute is unpaid → subtract the FULL breaks plus idle.
+    const netProductiveSeconds = Math.max(0, spanSeconds - lunch - tea - idle);
+    const remainingProductiveSeconds = Math.max(0, requiredProductiveSeconds - netProductiveSeconds);
+    const overtimeSeconds = Math.max(0, netProductiveSeconds - requiredProductiveSeconds);
+    const completionPct = requiredProductiveSeconds > 0
+        ? Math.min(100, Math.round((netProductiveSeconds / requiredProductiveSeconds) * 100))
+        : 100;
+    // Expected logout = clockIn + required + actual breaks + idle (≡ now + remaining).
+    const expectedLogout = new Date(input.clockIn.getTime() + (requiredProductiveSeconds + lunch + tea + idle) * 1000);
+    return {
+        shiftLenSeconds, spanSeconds, requiredProductiveSeconds,
+        allowedLunchSeconds, allowedTeaSeconds, countedLunchSeconds, countedTeaSeconds,
+        extraLunchSeconds, extraTeaSeconds, extraBreakSeconds,
+        idleSeconds: idle, netProductiveSeconds, remainingProductiveSeconds,
+        overtimeSeconds, completionPct, expectedLogout,
+    };
+}
 /** Derive a WorkPolicy from a Branch document (reuses existing CRM branch settings). */
 function policyFromBranch(branch) {
     return {
@@ -77,7 +115,8 @@ function policyFromBranch(branch) {
             lunch: (branch.breaks?.lunchMinutes ?? 45) * 60,
             tea: (branch.breaks?.teaMinutes ?? 15) * 60,
         },
-        billingModel: branch.breaks?.billingModel || 'B',
+        // Net Productive model: every break minute is unpaid (Model A) for ALL branches.
+        billingModel: 'A',
     };
 }
 //# sourceMappingURL=engine.js.map

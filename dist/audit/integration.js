@@ -31,17 +31,14 @@ async function audit(module, collection, fn) {
     try {
         const checks = await fn();
         results.push({ module, collection, checks, ok: true });
-      
     }
     catch (e) {
         results.push({ module, collection, checks: [], ok: false, note: e.message });
-        
     }
 }
 const assert = (cond, msg) => { if (!cond)
     throw new Error(msg); };
 async function main() {
-   
     // Auth
     await audit('Authentication', 'users/sessions', async () => {
         const login = await call('POST', '/auth/login', { email: EMAIL, password: PASSWORD });
@@ -179,7 +176,6 @@ async function main() {
     // ---- report ----
     const pass = results.filter(r => r.ok).length;
     const total = results.length;
- 
     const md = [
         '# Module Integration Audit — MongoDB',
         '',
@@ -205,7 +201,6 @@ async function main() {
     const out = (0, path_1.resolve)(process.cwd(), '..', 'MODULE-INTEGRATION-AUDIT.md');
     try {
         (0, fs_1.writeFileSync)(out, md);
-        
     }
     catch {
         (0, fs_1.writeFileSync)((0, path_1.resolve)(process.cwd(), 'MODULE-INTEGRATION-AUDIT.md'), md);

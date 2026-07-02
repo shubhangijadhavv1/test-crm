@@ -127,7 +127,7 @@ router.post('/', (0, validate_1.validate)(createBody), (0, http_1.asyncHandler)(
         timer: { running: false, accumulatedSeconds: 0 },
         createdBy: req.user.id,
     });
-    await (0, notify_1.notify)(body.assigneeId, { type: 'task.assigned', title: 'New task assigned', body: body.title, color: 'info' });
+    await (0, notify_1.notify)(body.assigneeId, { type: 'task.assigned', title: 'New task assigned', body: body.title, color: 'info', link: '/kanban' });
     await (0, audit_1.audit)(req.user, 'task.create', 'Task', doc._id);
     (0, cache_1.cacheClear)('dashboard'); // counters changed
     (0, socket_1.emitScoped)('task:moved', { id: doc._id }, { branchId: doc.branchId, userId: doc.assigneeId });
@@ -157,7 +157,7 @@ router.patch('/:id', (0, http_1.asyncHandler)(async (req, res) => {
         const assignee = await User_1.User.findById(body.assigneeId).select('branchId').lean();
         if (assignee?.branchId)
             task.branchId = assignee.branchId;
-        await (0, notify_1.notify)(String(body.assigneeId), { type: 'task.assigned', title: 'Task assigned to you', body: task.title, color: 'info' });
+        await (0, notify_1.notify)(String(body.assigneeId), { type: 'task.assigned', title: 'Task assigned to you', body: task.title, color: 'info', link: '/kanban' });
     }
     task.updatedBy = req.user.id;
     task.increment(); // bump version for optimistic concurrency
@@ -184,7 +184,7 @@ router.patch('/:id/move', (0, validate_1.validate)(moveBody), (0, http_1.asyncHa
     (0, socket_1.emitScoped)('task:moved', { id: task._id, status }, { branchId: task.branchId, userId: task.assigneeId });
     // Keep the assigner informed of progress they didn't make themselves.
     if (status !== prev && task.assignerId && String(task.assignerId) !== req.user.id) {
-        await (0, notify_1.notify)(String(task.assignerId), { type: 'task.status', title: 'Task status changed', body: `${task.title} → ${status}`, color: status === 'done' ? 'ok' : 'info' });
+        await (0, notify_1.notify)(String(task.assignerId), { type: 'task.status', title: 'Task status changed', body: `${task.title} → ${status}`, color: status === 'done' ? 'ok' : 'info', link: '/kanban' });
     }
     await (0, audit_1.audit)(req.user, 'task.move', 'Task', task._id, { before: { status: prev }, after: { status } });
     (0, http_1.ok)(res, { ...task.toObject(), liveSeconds: liveSeconds(task) });
@@ -243,7 +243,7 @@ router.post('/bulk', (0, validate_1.validate)(bulkBody), (0, http_1.asyncHandler
         affected++;
         (0, socket_1.emitScoped)('task:moved', { id: task._id }, { branchId: task.branchId, userId: task.assigneeId });
         if (action === 'reassign')
-            await (0, notify_1.notify)(String(assigneeId), { type: 'task.assigned', title: 'Task assigned to you', body: task.title, color: 'info' });
+            await (0, notify_1.notify)(String(assigneeId), { type: 'task.assigned', title: 'Task assigned to you', body: task.title, color: 'info', link: '/kanban' });
     }
     await (0, audit_1.audit)(req.user, `task.bulk.${action}`, 'Task', ids.join(','), { after: { affected, skipped } });
     if (affected)

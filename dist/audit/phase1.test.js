@@ -15,9 +15,8 @@ async function call(m, p, body, tok = sa) {
     const r = await fetch(BASE + p, { method: m, headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: `Bearer ${tok}` } : {}) }, body: body ? JSON.stringify(body) : undefined });
     return { status: r.status, json: await r.json().catch(() => ({})) };
 }
-const check = (n, c, d = '') => { c ? pass++ : fail++;  };
+const check = (n, c, d = '') => { c ? pass++ : fail++; };
 async function main() {
-
     sa = (await call('POST', '/auth/login', { email: 'aarav@gdc.com', password: 'Admin@12345' })).json.data?.accessToken;
     // ---- G1: analytics aggregation works (no cast error), returns array ----
     const branches = (await call('GET', '/branches')).json.data;
@@ -54,7 +53,6 @@ async function main() {
     await leave_1.LeaveBalance.deleteMany({ userId: empId });
     await User_1.User.deleteMany({ _id: empId });
     await (0, db_1.disconnectDB)();
-
     process.exit(fail ? 1 : 0);
 }
 main().catch((e) => { console.error(e); process.exit(1); });
