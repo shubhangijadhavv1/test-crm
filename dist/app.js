@@ -32,7 +32,7 @@ const dashboard_1 = __importDefault(require("./modules/dashboard"));
 const push_1 = __importDefault(require("./modules/push"));
 function createApp() {
     const app = (0, express_1.default)();
-    app.set('trust proxy', true); // honour X-Forwarded-For so req.ip is the real client IP
+    app.set('trust proxy', 1); // honour X-Forwarded-For so req.ip is the real client IP
     app.use((0, helmet_1.default)({
         contentSecurityPolicy: false,
         crossOriginOpenerPolicy: false,
