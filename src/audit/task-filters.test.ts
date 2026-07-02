@@ -17,10 +17,10 @@ async function call(m: string, p: string, body?: unknown, tok = sa): Promise<any
   const r = await fetch(BASE + p, { method: m, headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: `Bearer ${tok}` } : {}) }, body: body ? JSON.stringify(body) : undefined })
   return r.json().catch(() => ({}))
 }
-const check = (n: string, c: boolean, d = '') => { c ? pass++ : fail++; console.log(`  ${c ? '✅' : '❌'} ${n}${d ? ' — ' + d : ''}`) }
+const check = (n: string, c: boolean, d = '') => { c ? pass++ : fail++;}
 
 async function main() {
-  console.log(`\nTask filters + scoping test → ${BASE}\n${'─'.repeat(60)}`)
+
   sa = (await call('POST', '/auth/login', { email: EMAIL, password: PASSWORD })).data?.accessToken
   const branchId = (await call('GET', '/branches')).data?.[0]?._id
 
@@ -59,7 +59,7 @@ async function main() {
   await Task.deleteMany({ _id: { $in: [t1, t2] } })
   await User.deleteMany({ _id: { $in: [aId, bId] } })
   await disconnectDB()
-  console.log(`${'─'.repeat(60)}\n${pass} passed, ${fail} failed · test docs cleaned up\n`)
+
   process.exit(fail ? 1 : 0)
 }
 main().catch((e) => { console.error(e); process.exit(1) })

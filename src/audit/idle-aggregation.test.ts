@@ -8,11 +8,11 @@ import { ActivityTick } from '../models/ActivityTick'
 import { recomputeSession } from '../agent/session'
 
 let pass = 0, fail = 0
-const check = (n: string, c: boolean, d = '') => { c ? pass++ : fail++; console.log(`  ${c ? '✅' : '❌'} ${n}${d ? ' — ' + d : ''}`) }
+const check = (n: string, c: boolean, d = '') => { c ? pass++ : fail++; }
 
 async function main() {
   await connectDB()
-  console.log(`\nIdle aggregation — partial idle in active-ending ticks\n${'─'.repeat(60)}`)
+
   const date = '2099-01-01' // far future → never clashes with real data
   const loginAt = new Date('2099-01-01T10:00:00.000Z')
   await Attendance.deleteMany({ date })
@@ -32,8 +32,7 @@ async function main() {
 
   await ActivityTick.deleteMany({ attendanceId: att._id })
   await Attendance.deleteMany({ date })
-  console.log('─'.repeat(60))
-  console.log(`${pass} passed, ${fail} failed · test docs cleaned up`)
+
   await disconnectDB()
   process.exit(fail ? 1 : 0)
 }

@@ -34,7 +34,7 @@ async function main() {
   try { fs.rmSync(path.join(process.cwd(), 'uploads', 'screenshots'), { recursive: true, force: true }) } catch { /* ignore */ }
   const removed = results.reduce((a, r) => a + (r.deletedCount || 0), 0)
   const superAdmins = await User.countDocuments({ role: 'superadmin' })
-  console.log(`[reset] removed ${removed} documents · kept ${superAdmins} super admin(s)`)
+
   await disconnectDB()
   process.exit(0)
 }

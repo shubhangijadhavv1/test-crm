@@ -241,7 +241,7 @@ async function main() {
     if (proj) { Object.assign(proj, fields); await proj.save(); updated++ }
     else { seq++; await Project.create({ ...fields, projectCode: `DEM-${String(seq).padStart(4, '0')}` }); created++ }
   }
-  console.log(`[import] demo projects → created ${created}, updated ${updated} · total ${DATA.length}`)
+
   await disconnectDB()
   process.exit(0)
 }

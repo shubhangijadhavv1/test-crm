@@ -78,7 +78,7 @@ async function main() {
         await Project_1.Project.updateOne({ _id: p._id }, { $set: { categoryId: cId, subCategoryId: sId } });
         updated++;
     }
-    console.log(`[categorize] updated ${updated} projects · categories: ${[...catCache.keys()].join(', ')}`);
+  
     await (0, db_1.disconnectDB)();
     process.exit(0);
 }

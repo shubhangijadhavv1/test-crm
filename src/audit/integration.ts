@@ -34,17 +34,17 @@ async function audit(module: string, collection: string, fn: () => Promise<strin
   try {
     const checks = await fn()
     results.push({ module, collection, checks, ok: true })
-    console.log(`✅ ${module.padEnd(26)} [${collection}]  ${checks.join(' · ')}`)
+  
   } catch (e) {
     results.push({ module, collection, checks: [], ok: false, note: (e as Error).message })
-    console.log(`❌ ${module.padEnd(26)} [${collection}]  ${(e as Error).message}`)
+
   }
 }
 
 const assert = (cond: unknown, msg: string) => { if (!cond) throw new Error(msg) }
 
 async function main() {
-  console.log(`\nGDC CRM — MongoDB integration audit\nTarget: ${BASE}\n${'─'.repeat(70)}`)
+
 
   // Auth
   await audit('Authentication', 'users/sessions', async () => {
@@ -195,7 +195,7 @@ async function main() {
   // ---- report ----
   const pass = results.filter(r => r.ok).length
   const total = results.length
-  console.log(`${'─'.repeat(70)}\n${pass}/${total} modules verified against MongoDB\n`)
+
 
   const md = [
     '# Module Integration Audit — MongoDB',
@@ -221,7 +221,7 @@ async function main() {
   ].join('\n')
 
   const out = resolve(process.cwd(), '..', 'MODULE-INTEGRATION-AUDIT.md')
-  try { writeFileSync(out, md); console.log(`Report written: ${out}`) }
+  try { writeFileSync(out, md); }
   catch { writeFileSync(resolve(process.cwd(), 'MODULE-INTEGRATION-AUDIT.md'), md) }
 
   process.exit(pass === total ? 0 : 1)

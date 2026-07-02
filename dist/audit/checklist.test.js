@@ -20,9 +20,9 @@ async function call(m, p, body, tok = sa) {
     const r = await fetch(BASE + p, { method: m, headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: `Bearer ${tok}` } : {}) }, body: body ? JSON.stringify(body) : undefined });
     return { status: r.status, json: await r.json().catch(() => ({})) };
 }
-const check = (n, c, d = '') => { c ? pass++ : fail++; console.log(`  ${c ? '✅' : '❌'} ${n}${d ? ' — ' + d : ''}`); };
+const check = (n, c, d = '') => { c ? pass++ : fail++; };
 async function main() {
-    console.log(`\nChecklist points + authority test → ${BASE}\n${'─'.repeat(60)}`);
+
     sa = (await call('POST', '/auth/login', { email: EMAIL, password: PASSWORD })).json.data?.accessToken;
     const saId = (await call('GET', '/auth/me')).json.data?._id;
     // category + subcategory
@@ -82,7 +82,7 @@ async function main() {
     await catalog_1.Category.deleteMany({ _id: catId });
     await User_1.User.deleteMany({ _id: { $in: [devId, revId] } });
     await (0, db_1.disconnectDB)();
-    console.log(`${'─'.repeat(60)}\n${pass} passed, ${fail} failed · test docs cleaned up\n`);
+   
     process.exit(fail ? 1 : 0);
 }
 main().catch((e) => { console.error(e); process.exit(1); });

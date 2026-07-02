@@ -25,18 +25,18 @@ async function syncIndexes() {
       try { await m.syncIndexes() } catch (e) { console.warn(`[db] index rebuild failed for ${m.modelName} (likely duplicate active values):`, (e as Error).message) }
     }
   }
-  console.log('[db] indexes synced (partial-unique applied)')
+
 }
 
 async function main() {
   const { uri, inMemory } = await connectDB()
-  console.log(`[db] connected${inMemory ? ' (in-memory MongoDB)' : ''}`)
+
 
   await syncIndexes()
 
   // Bootstrap a Super Admin if none exists. No demo data; never wipes.
   const boot = await ensureSuperAdmin()
-  console.log(`[auth] super admin ${boot.created ? 'created' : 'present'}: ${boot.email}`)
+ 
 
   const app = createApp()
   const server = http.createServer(app)

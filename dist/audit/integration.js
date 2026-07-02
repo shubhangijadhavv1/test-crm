@@ -31,17 +31,17 @@ async function audit(module, collection, fn) {
     try {
         const checks = await fn();
         results.push({ module, collection, checks, ok: true });
-        console.log(`✅ ${module.padEnd(26)} [${collection}]  ${checks.join(' · ')}`);
+      
     }
     catch (e) {
         results.push({ module, collection, checks: [], ok: false, note: e.message });
-        console.log(`❌ ${module.padEnd(26)} [${collection}]  ${e.message}`);
+        
     }
 }
 const assert = (cond, msg) => { if (!cond)
     throw new Error(msg); };
 async function main() {
-    console.log(`\nGDC CRM — MongoDB integration audit\nTarget: ${BASE}\n${'─'.repeat(70)}`);
+   
     // Auth
     await audit('Authentication', 'users/sessions', async () => {
         const login = await call('POST', '/auth/login', { email: EMAIL, password: PASSWORD });
@@ -179,7 +179,7 @@ async function main() {
     // ---- report ----
     const pass = results.filter(r => r.ok).length;
     const total = results.length;
-    console.log(`${'─'.repeat(70)}\n${pass}/${total} modules verified against MongoDB\n`);
+ 
     const md = [
         '# Module Integration Audit — MongoDB',
         '',
@@ -205,7 +205,7 @@ async function main() {
     const out = (0, path_1.resolve)(process.cwd(), '..', 'MODULE-INTEGRATION-AUDIT.md');
     try {
         (0, fs_1.writeFileSync)(out, md);
-        console.log(`Report written: ${out}`);
+        
     }
     catch {
         (0, fs_1.writeFileSync)((0, path_1.resolve)(process.cwd(), 'MODULE-INTEGRATION-AUDIT.md'), md);

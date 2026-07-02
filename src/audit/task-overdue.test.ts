@@ -8,10 +8,10 @@ import { Notification } from '../models/misc'
 import { sweepOverdue } from '../jobs/overdue'
 
 let pass = 0, fail = 0
-const check = (n: string, c: boolean, d = '') => { c ? pass++ : fail++; console.log(`  ${c ? '✅' : '❌'} ${n}${d ? ' — ' + d : ''}`) }
+const check = (n: string, c: boolean, d = '') => { c ? pass++ : fail++;  }
 
 async function main() {
-  console.log(`\nOverdue sweep test\n${'─'.repeat(60)}`)
+
   await connectDB()
 
   const past = new Date(Date.now() - 86_400_000) // yesterday
@@ -38,7 +38,6 @@ async function main() {
   await Task.deleteMany({ _id: { $in: [overdueId, freshId, doneId] } })
   await Notification.deleteMany({ type: 'task.overdue', body: `OD past ${tag}` })
   await disconnectDB()
-  console.log(`${'─'.repeat(60)}\n${pass} passed, ${fail} failed · test docs cleaned up\n`)
   process.exit(fail ? 1 : 0)
 }
 main().catch((e) => { console.error(e); process.exit(1) })

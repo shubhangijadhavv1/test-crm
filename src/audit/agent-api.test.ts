@@ -19,14 +19,14 @@ async function call(m: string, p: string, body?: unknown, tok = sa): Promise<{ s
   const r = await fetch(BASE + p, { method: m, headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: `Bearer ${tok}` } : {}) }, body: body ? JSON.stringify(body) : undefined })
   return { status: r.status, json: await r.json().catch(() => ({})) }
 }
-const check = (n: string, c: boolean, d = '') => { c ? pass++ : fail++; console.log(`  ${c ? '✅' : '❌'} ${n}${d ? ' — ' + d : ''}`) }
+const check = (n: string, c: boolean, d = '') => { c ? pass++ : fail++; }
 const ticks = (idle: number, active: number) => [
   ...Array.from({ length: idle }, () => ({ ts: new Date(), isIdle: true })),
   ...Array.from({ length: active }, () => ({ ts: new Date(), isIdle: false, keyCount: 120, mouseCount: 60 })),
 ]
 
 async function main() {
-  console.log(`\nAgent API pipeline test → ${BASE}\n${'─'.repeat(60)}`)
+  
   sa = (await call('POST', '/auth/login', { email: EMAIL, password: PASSWORD })).json.data?.accessToken
   const branchId = (await call('GET', '/branches')).json.data?.[0]?._id
   const tag = Date.now()
@@ -75,7 +75,7 @@ async function main() {
   await Attendance.deleteMany({ _id: att?._id })
   await User.deleteMany({ _id: empId })
   await disconnectDB()
-  console.log(`${'─'.repeat(60)}\n${pass} passed, ${fail} failed · test docs cleaned up\n`)
+
   process.exit(fail ? 1 : 0)
 }
 main().catch((e) => { console.error(e); process.exit(1) })

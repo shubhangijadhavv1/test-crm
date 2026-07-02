@@ -18,9 +18,9 @@ async function call(m, p, body, headers = {}) {
     const r = await fetch(BASE + p, { method: m, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sa}`, ...headers }, body: body ? JSON.stringify(body) : undefined });
     return { status: r.status, json: await r.json().catch(() => ({})) };
 }
-const check = (n, c, d = '') => { c ? pass++ : fail++; console.log(`  ${c ? '✅' : '❌'} ${n}${d ? ' — ' + d : ''}`); };
+const check = (n, c, d = '') => { c ? pass++ : fail++;  };
 async function main() {
-    console.log(`\nOptimistic concurrency test → ${BASE}\n${'─'.repeat(60)}`);
+
     sa = (await call('POST', '/auth/login', { email: EMAIL, password: PASSWORD })).json.data?.accessToken;
     // ---- Project ----
     const projId = (await call('POST', '/projects', { type: 'demo', name: 'Concurrency Test' })).json.data?._id;
@@ -47,7 +47,7 @@ async function main() {
     await Task_1.Task.deleteMany({ _id: taskId });
     await Project_1.Project.deleteMany({ _id: projId });
     await (0, db_1.disconnectDB)();
-    console.log(`${'─'.repeat(60)}\n${pass} passed, ${fail} failed · test docs cleaned up\n`);
+
     process.exit(fail ? 1 : 0);
 }
 main().catch((e) => { console.error(e); process.exit(1); });

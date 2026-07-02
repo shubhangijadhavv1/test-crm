@@ -245,7 +245,7 @@ async function main() {
             created++;
         }
     }
-    console.log(`[import] demo projects → created ${created}, updated ${updated} · total ${DATA.length}`);
+
     await (0, db_1.disconnectDB)();
     process.exit(0);
 }

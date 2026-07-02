@@ -13,10 +13,10 @@ async function call(m: string, p: string, body?: unknown): Promise<any> {
   const r = await fetch(BASE + p, { method: m, headers: { 'Content-Type': 'application/json', ...(sa ? { Authorization: `Bearer ${sa}` } : {}) }, body: body ? JSON.stringify(body) : undefined })
   return r.json().catch(() => ({}))
 }
-const check = (n: string, c: boolean, d = '') => { c ? pass++ : fail++; console.log(`  ${c ? '✅' : '❌'} ${n}${d ? ' — ' + d : ''}`) }
+const check = (n: string, c: boolean, d = '') => { c ? pass++ : fail++; }
 
 async function main() {
-  console.log(`\nQA re-sync from template points test\n${'─'.repeat(56)}`)
+
   sa = (await call('POST', '/auth/login', { email: 'aarav@gdc.com', password: 'Admin@12345' })).data?.accessToken
   const shra = (await call('GET', '/employees?q=Shraddha')).data?.[0]?._id
   const catId = (await call('POST', '/categories', { name: 'ReSync Cat ' + Date.now() })).data._id
@@ -43,7 +43,7 @@ async function main() {
   await ChecklistPoint.deleteMany({ categoryId: catId })
   await Category.deleteMany({ _id: catId })
   await disconnectDB()
-  console.log(`${'─'.repeat(56)}\n${pass} passed, ${fail} failed · cleaned up\n`)
+
   process.exit(fail ? 1 : 0)
 }
 main().catch((e) => { console.error(e); process.exit(1) })

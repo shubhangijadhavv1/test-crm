@@ -6,7 +6,7 @@
 import { computeDay, policyFromBranch, WorkPolicy, Tick } from '../agent/engine'
 
 let pass = 0, fail = 0
-const check = (n: string, c: boolean, d = '') => { c ? pass++ : fail++; console.log(`  ${c ? '✅' : '❌'} ${n}${d ? ' — ' + d : ''}`) }
+const check = (n: string, c: boolean, d = '') => { c ? pass++ : fail++;  }
 const at = (hhmm: string) => { const [h, m] = hhmm.split(':').map(Number); const d = new Date(2026, 5, 16, h, m, 0, 0); return d }
 const idleTicks = (n: number): Tick[] => Array.from({ length: n }, () => ({ isIdle: true }))
 const activeTicks = (n: number): Tick[] => Array.from({ length: n }, () => ({ isIdle: false }))
@@ -16,7 +16,7 @@ const base: WorkPolicy = {
   breakAllowanceSeconds: { lunch: 30 * 60, tea: 15 * 60 }, billingModel: 'B',
 }
 
-console.log(`\nWork-time / late-mark engine\n${'─'.repeat(60)}`)
+
 
 // 1) On-time, lunch exactly at allowance, tea overage 5m → Model B
 {
@@ -78,5 +78,4 @@ console.log(`\nWork-time / late-mark engine\n${'─'.repeat(60)}`)
   check('net work clamped at 0', r.netWorkSeconds === 0, `${r.netWorkSeconds}`)
 }
 
-console.log(`${'─'.repeat(60)}\n${pass} passed, ${fail} failed\n`)
 process.exit(fail ? 1 : 0)

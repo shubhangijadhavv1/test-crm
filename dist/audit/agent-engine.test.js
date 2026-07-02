@@ -7,7 +7,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
  */
 const engine_1 = require("../agent/engine");
 let pass = 0, fail = 0;
-const check = (n, c, d = '') => { c ? pass++ : fail++; console.log(`  ${c ? '✅' : '❌'} ${n}${d ? ' — ' + d : ''}`); };
+const check = (n, c, d = '') => { c ? pass++ : fail++; };
 const at = (hhmm) => { const [h, m] = hhmm.split(':').map(Number); const d = new Date(2026, 5, 16, h, m, 0, 0); return d; };
 const idleTicks = (n) => Array.from({ length: n }, () => ({ isIdle: true }));
 const activeTicks = (n) => Array.from({ length: n }, () => ({ isIdle: false }));
@@ -15,7 +15,7 @@ const base = {
     shiftStart: '09:00', shiftEnd: '18:00', graceMinutes: 15,
     breakAllowanceSeconds: { lunch: 30 * 60, tea: 15 * 60 }, billingModel: 'B',
 };
-console.log(`\nWork-time / late-mark engine\n${'─'.repeat(60)}`);
+
 // 1) On-time, lunch exactly at allowance, tea overage 5m → Model B
 {
     const r = (0, engine_1.computeDay)({
@@ -69,6 +69,6 @@ console.log(`\nWork-time / late-mark engine\n${'─'.repeat(60)}`);
     const r = (0, engine_1.computeDay)({ clockIn: at('09:00'), clockOut: at('09:10'), ticks: idleTicks(5), breaks: [{ type: 'lunch', seconds: 60 * 60 }], policy: base });
     check('net work clamped at 0', r.netWorkSeconds === 0, `${r.netWorkSeconds}`);
 }
-console.log(`${'─'.repeat(60)}\n${pass} passed, ${fail} failed\n`);
+
 process.exit(fail ? 1 : 0);
 //# sourceMappingURL=agent-engine.test.js.map

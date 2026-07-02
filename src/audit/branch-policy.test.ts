@@ -19,12 +19,12 @@ async function call(method: string, path: string, body?: unknown, tok = token): 
   return { status: res.status, json: await res.json().catch(() => ({})) }
 }
 function check(name: string, cond: boolean, detail = '') {
-  if (cond) { pass++; console.log(`  ✅ ${name}${detail ? ' — ' + detail : ''}`) }
-  else { fail++; console.log(`  ❌ ${name}${detail ? ' — ' + detail : ''}`) }
+  if (cond) { pass++;  }
+  else { fail++; }
 }
 
 async function main() {
-  console.log(`\nBranch policy + weekend calendar test → ${BASE}\n${'─'.repeat(64)}`)
+ 
 
   token = (await call('POST', '/auth/login', { email: EMAIL, password: PASSWORD })).json?.data?.accessToken
   check('super admin login', !!token)
@@ -68,7 +68,6 @@ async function main() {
   check('1st Sat (6) NOT weekoff', stat(6) !== 'weekoff', stat(6))
   check('3rd Sat (20) NOT weekoff', stat(20) !== 'weekoff', stat(20))
 
-  console.log(`${'─'.repeat(64)}\n${pass} passed, ${fail} failed\n`)
   process.exit(fail ? 1 : 0)
 }
 main().catch((e) => { console.error(e); process.exit(1) })

@@ -141,7 +141,7 @@ async function main() {
         const stage = (p) => ({ progress: p, status: p >= 100 ? 'done' : p > 0 ? 'inprogress' : 'notstarted', reviewerId: empCache.get(assignee) });
         await qa_1.QaProcess.findOneAndUpdate({ projectId: proj._id }, { projectId: proj._id, stage1: stage(qa1), stage2: stage(qa2), state, updatedBy: by }, { upsert: true, new: true, setDefaultsOnInsert: true });
     }
-    console.log(`[import] live projects → created ${created}, updated ${updated} · total ${DATA.length}`);
+
     await (0, db_1.disconnectDB)();
     process.exit(0);
 }

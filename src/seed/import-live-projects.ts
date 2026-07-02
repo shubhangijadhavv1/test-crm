@@ -140,7 +140,7 @@ async function main() {
       { upsert: true, new: true, setDefaultsOnInsert: true },
     )
   }
-  console.log(`[import] live projects → created ${created}, updated ${updated} · total ${DATA.length}`)
+
   await disconnectDB()
   process.exit(0)
 }

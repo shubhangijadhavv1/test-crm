@@ -19,10 +19,10 @@ async function call(m: string, p: string, body?: unknown, tok = sa): Promise<any
   const r = await fetch(BASE + p, { method: m, headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: `Bearer ${tok}` } : {}) }, body: body ? JSON.stringify(body) : undefined })
   return { status: r.status, json: await r.json().catch(() => ({})) }
 }
-const check = (n: string, c: boolean, d = '') => { c ? pass++ : fail++; console.log(`  ${c ? '✅' : '❌'} ${n}${d ? ' — ' + d : ''}`) }
+const check = (n: string, c: boolean, d = '') => { c ? pass++ : fail++;  }
 
 async function main() {
-  console.log(`\nChecklist points + authority test → ${BASE}\n${'─'.repeat(60)}`)
+
   sa = (await call('POST', '/auth/login', { email: EMAIL, password: PASSWORD })).json.data?.accessToken
   const saId = (await call('GET', '/auth/me')).json.data?._id
 
@@ -94,7 +94,7 @@ async function main() {
   await Category.deleteMany({ _id: catId })
   await User.deleteMany({ _id: { $in: [devId, revId] } })
   await disconnectDB()
-  console.log(`${'─'.repeat(60)}\n${pass} passed, ${fail} failed · test docs cleaned up\n`)
+
   process.exit(fail ? 1 : 0)
 }
 main().catch((e) => { console.error(e); process.exit(1) })
