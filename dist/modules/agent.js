@@ -281,14 +281,22 @@ router.post('/screenshot', (0, validate_1.validate)(shotBody), (0, http_1.asyncH
 }));
 /** Resolve which user's data the caller may read: self, or (admin/superadmin) a given userId. */
 async function resolveTarget(req) {
-    if (req.query.userId && req.user.role !== 'employee') {
-        const target = req.query.userId;
-        if (req.user.role === 'admin' && req.user.branchId) {
-            const u = await User_1.User.findById(target).select('branchId').lean();
-            if (String(u?.branchId) !== String(req.user.branchId))
-                throw ApiError_1.ApiError.forbidden('Out of your branch');
+    if (req.query.userId) {
+        let allowed = req.user.role !== 'employee';
+        if (!allowed) {
+            const me = await User_1.User.findById(req.user.id).select('moduleAccess').lean();
+            if (me?.moduleAccess?.monitoring)
+                allowed = true;
         }
-        return target;
+        if (allowed) {
+            const target = req.query.userId;
+            if (req.user.role !== 'superadmin' && req.user.branchId) {
+                const u = await User_1.User.findById(target).select('branchId').lean();
+                if (String(u?.branchId) !== String(req.user.branchId))
+                    throw ApiError_1.ApiError.forbidden('Out of your branch');
+            }
+            return target;
+        }
     }
     return req.user.id;
 }
@@ -368,7 +376,13 @@ router.delete('/screenshots/:id', (0, http_1.asyncHandler)(async (req, res) => {
 }));
 // GET /agent/summary?date=&branchId= — admin daily roll-up across the branch
 router.get('/summary', (0, http_1.asyncHandler)(async (req, res) => {
-    if (req.user.role === 'employee')
+    let allowed = req.user.role !== 'employee';
+    if (!allowed) {
+        const me = await User_1.User.findById(req.user.id).select('moduleAccess').lean();
+        if (me?.moduleAccess?.monitoring)
+            allowed = true;
+    }
+    if (!allowed)
         throw ApiError_1.ApiError.forbidden('Admins only');
     const date = req.query.date || dayKey();
     const filter = { date, ...(0, rbac_1.branchScope)(req) };

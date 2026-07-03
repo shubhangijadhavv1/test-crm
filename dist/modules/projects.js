@@ -9,7 +9,6 @@ const http_1 = require("../utils/http");
 const regex_1 = require("../utils/regex");
 const validate_1 = require("../middleware/validate");
 const auth_1 = require("../middleware/auth");
-const rbac_1 = require("../middleware/rbac");
 const ApiError_1 = require("../utils/ApiError");
 const audit_1 = require("../utils/audit");
 const qa_1 = require("./qa");
@@ -123,7 +122,7 @@ router.get('/:id', (0, http_1.asyncHandler)(async (req, res) => {
         throw ApiError_1.ApiError.notFound('Project not found');
     (0, http_1.ok)(res, doc);
 }));
-router.post('/', (0, rbac_1.requireRole)('superadmin', 'admin'), (0, validate_1.validate)(createBody), (0, http_1.asyncHandler)(async (req, res) => {
+router.post('/', (0, validate_1.validate)(createBody), (0, http_1.asyncHandler)(async (req, res) => {
     const body = req.body;
     if (body.dueDate && body.startDate && body.dueDate < body.startDate)
         throw ApiError_1.ApiError.badRequest('dueDate must be on or after startDate');
@@ -141,7 +140,7 @@ router.post('/', (0, rbac_1.requireRole)('superadmin', 'admin'), (0, validate_1.
     await (0, audit_1.audit)(req.user, 'project.create', 'Project', doc._id, { after: doc });
     (0, http_1.created)(res, doc);
 }));
-router.patch('/:id', (0, rbac_1.requireRole)('superadmin', 'admin'), (0, http_1.asyncHandler)(async (req, res) => {
+router.patch('/:id', (0, http_1.asyncHandler)(async (req, res) => {
     const update = { ...req.body };
     delete update.status; // status only via guarded route
     // Reassigning the employee moves the project to that employee's branch (unless branch set explicitly).
@@ -202,7 +201,7 @@ router.patch('/:id/status', (0, validate_1.validate)(statusBody), (0, http_1.asy
     await (0, audit_1.audit)(req.user, 'project.status', 'Project', doc._id, { before: { status: from }, after: { status } });
     (0, http_1.ok)(res, doc);
 }));
-router.delete('/:id', (0, rbac_1.requireRole)('superadmin'), (0, http_1.asyncHandler)(async (req, res) => {
+router.delete('/:id', (0, http_1.asyncHandler)(async (req, res) => {
     const doc = await Project_1.Project.findByIdAndUpdate(req.params.id, { isDeleted: true, deletedAt: new Date() }, { new: true });
     if (!doc)
         throw ApiError_1.ApiError.notFound('Project not found');

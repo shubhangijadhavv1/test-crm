@@ -66,9 +66,9 @@ function canWriteTask(user, task) {
 router.get('/', (0, http_1.asyncHandler)(async (req, res) => {
     const { page, limit, skip, sort } = (0, http_1.parsePaging)(req.query);
     const filter = { isDeleted: false, ...(0, rbac_1.branchScope)(req) };
-    // Employees see only their own tasks; managers/superadmin can filter by assignee.
+    // Employees see tasks they are assigned to OR tasks they created/assigned; managers/superadmin can filter by assignee.
     if (req.user.role === 'employee')
-        filter.assigneeId = req.user.id;
+        filter.$or = [{ assigneeId: req.user.id }, { assignerId: req.user.id }];
     else if (req.query.assignee)
         filter.assigneeId = req.query.assignee;
     if (req.query.status)
@@ -113,9 +113,8 @@ const createBody = zod_1.z.object({
 });
 router.post('/', (0, validate_1.validate)(createBody), (0, http_1.asyncHandler)(async (req, res) => {
     const body = req.body;
-    // assignment authority: employees need tasks.assign scope (simplified: superadmin/admin always allowed)
-    if (req.user.role === 'employee')
-        throw ApiError_1.ApiError.forbidden('You are not permitted to assign tasks');
+    // assignment authority: all authenticated users are permitted to create/assign tasks
+    // (Previously restricted to superadmin/admin)
     // The task belongs to the assignee's branch so branch-scoped users can see their own tasks
     // (a superadmin assigner has no branch of their own).
     const assignee = await User_1.User.findById(body.assigneeId).select('branchId').lean();
