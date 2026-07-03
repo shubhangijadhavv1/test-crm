@@ -274,13 +274,20 @@ router.post('/screenshot', validate(shotBody), asyncHandler(async (req, res) => 
 
 /** Resolve which user's data the caller may read: self, or (admin/superadmin) a given userId. */
 async function resolveTarget(req: import('express').Request): Promise<string> {
-  if (req.query.userId && req.user!.role !== 'employee') {
-    const target = req.query.userId as string
-    if (req.user!.role === 'admin' && req.user!.branchId) {
-      const u = await User.findById(target).select('branchId').lean()
-      if (String(u?.branchId) !== String(req.user!.branchId)) throw ApiError.forbidden('Out of your branch')
+  if (req.query.userId) {
+    let allowed = req.user!.role !== 'employee'
+    if (!allowed) {
+      const me = await User.findById(req.user!.id).select('moduleAccess').lean()
+      if (me?.moduleAccess?.monitoring) allowed = true
     }
-    return target
+    if (allowed) {
+      const target = req.query.userId as string
+      if (req.user!.role !== 'superadmin' && req.user!.branchId) {
+        const u = await User.findById(target).select('branchId').lean()
+        if (String(u?.branchId) !== String(req.user!.branchId)) throw ApiError.forbidden('Out of your branch')
+      }
+      return target
+    }
   }
   return req.user!.id
 }
@@ -349,7 +356,12 @@ router.delete('/screenshots/:id', asyncHandler(async (req, res) => {
 
 // GET /agent/summary?date=&branchId= — admin daily roll-up across the branch
 router.get('/summary', asyncHandler(async (req, res) => {
-  if (req.user!.role === 'employee') throw ApiError.forbidden('Admins only')
+  let allowed = req.user!.role !== 'employee'
+  if (!allowed) {
+    const me = await User.findById(req.user!.id).select('moduleAccess').lean()
+    if (me?.moduleAccess?.monitoring) allowed = true
+  }
+  if (!allowed) throw ApiError.forbidden('Admins only')
   const date = (req.query.date as string) || dayKey()
   const filter: Record<string, unknown> = { date, ...branchScope(req) }
   if (req.query.branchId && req.user!.role === 'superadmin') filter.branchId = req.query.branchId

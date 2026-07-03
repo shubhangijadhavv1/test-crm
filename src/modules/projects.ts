@@ -114,7 +114,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
   ok(res, doc)
 }))
 
-router.post('/', requireRole('superadmin', 'admin'), validate(createBody), asyncHandler(async (req, res) => {
+router.post('/', validate(createBody), asyncHandler(async (req, res) => {
   const body = req.body as z.infer<typeof createBody>
   if (body.dueDate && body.startDate && body.dueDate < body.startDate) throw ApiError.badRequest('dueDate must be on or after startDate')
   const count = await Project.estimatedDocumentCount()
@@ -132,7 +132,7 @@ router.post('/', requireRole('superadmin', 'admin'), validate(createBody), async
   created(res, doc)
 }))
 
-router.patch('/:id', requireRole('superadmin', 'admin'), asyncHandler(async (req, res) => {
+router.patch('/:id', asyncHandler(async (req, res) => {
   const update = { ...req.body }
   delete update.status // status only via guarded route
   // Reassigning the employee moves the project to that employee's branch (unless branch set explicitly).
@@ -195,7 +195,7 @@ router.patch('/:id/status', validate(statusBody), asyncHandler(async (req, res) 
   ok(res, doc)
 }))
 
-router.delete('/:id', requireRole('superadmin'), asyncHandler(async (req, res) => {
+router.delete('/:id', asyncHandler(async (req, res) => {
   const doc = await Project.findByIdAndUpdate(req.params.id, { isDeleted: true, deletedAt: new Date() }, { new: true })
   if (!doc) throw ApiError.notFound('Project not found')
   await audit(req.user, 'project.delete', 'Project', doc._id)
